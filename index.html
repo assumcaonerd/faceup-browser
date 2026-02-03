@@ -5,341 +5,382 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Face Swap - Browser Only</title>
   <style>
-    :root { color-scheme: dark light; }
-    body{font-family:system-ui,Arial,sans-serif; margin:24px; background:#0b1220; color:#e7eefc}
-    h1{margin:0 0 12px}
-    .grid{display:grid; gap:16px; grid-template-columns:1fr 1fr}
-    .card{background:#0e1a33; border:1px solid #213459; border-radius:16px; padding:12px}
-    .card h3{margin:6px 0 10px}
-    canvas, img{width:100%; max-height:60vh; object-fit:contain; background:#0b0f1d; border-radius:12px}
-    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
-    button{background:#3b82f6; color:white; border:none; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer}
-    button[disabled]{opacity:.5; cursor:not-allowed}
-    .pill{font-size:12px; opacity:.85}
-    .footer{opacity:.8; margin-top:10px}
-    a{color:#8ab4ff}
+    :root { color-scheme: dark; }
+    body{
+      margin:24px;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background:#0b1220; color:#e7eefc;
+    }
+    h1{ margin:0 0 12px 0; font-size:28px; }
+    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0 18px 0; }
+    button{
+      background:#3b82f6; color:white; border:none;
+      padding:10px 14px; border-radius:12px; font-weight:700;
+      cursor:pointer;
+    }
+    button:disabled{ opacity:.45; cursor:not-allowed; }
+    .pill{ font-size:12px; opacity:.9; padding:6px 10px; border-radius:999px; background:#0e1a33; border:1px solid #1f2b52; }
+    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    .card{
+      background:#0e1a33; border:1px solid #213459;
+      border-radius:16px; padding:12px;
+    }
+    .card h3{ margin:6px 0 10px 0; font-size:14px; opacity:.95; }
+    .card input{ margin-bottom:10px; }
+    canvas{
+      width:100%; height:auto; max-height:62vh; object-fit:contain;
+      background:#060b16; border-radius:12px; border:1px solid #1f2b52;
+    }
+    .outWrap{ margin-top:16px; }
+    .note{ font-size:12px; opacity:.8; margin-top:8px; }
+    .warn{ color:#fbbf24; }
   </style>
 </head>
 <body>
   <h1>Face Swap - Browser</h1>
+
   <div class="row">
     <button id="swapBtn" disabled>Swap Faces</button>
     <button id="downloadBtn" disabled>Baixar PNG</button>
     <span id="status" class="pill">Carregue as duas imagens.</span>
+    <span class="pill warn">Dica: fotos com angulo e luz parecidos ficam muito melhores.</span>
   </div>
 
   <div class="grid">
     <div class="card">
       <h3>Imagem FONTE (rosto que entra)</h3>
       <input type="file" id="srcFile" accept="image/*" />
-      <img id="srcImg" alt="Fonte" />
+      <canvas id="srcCanvas"></canvas>
+      <div class="note">Apenas detectamos o rosto no navegador. Nada é enviado.</div>
     </div>
+
     <div class="card">
       <h3>Imagem ALVO (foto final)</h3>
-      <input type="file" id="tgtFile" accept="image/*" />
-      <img id="tgtImg" alt="Alvo" />
+      <input type="file" id="dstFile" accept="image/*" />
+      <canvas id="dstCanvas"></canvas>
+      <div class="note">O resultado aparece abaixo.</div>
     </div>
   </div>
 
-  <div class="card" style="margin-top:16px">
+  <div class="card outWrap">
     <h3>Resultado</h3>
     <canvas id="outCanvas"></canvas>
-    <div class="footer">
-      Dica: rostos de frente ou 3/4, boa iluminação, cabeça inteira visível.
-      Use com consentimento dos envolvidos.
+    <div class="note">
+      Se ficar "colado" ou estranho, quase sempre é angulo, tamanho e luz diferentes. Este app melhora isso, mas não faz milagre.
     </div>
   </div>
 
-  <!-- MediaPipe FaceMesh -->
+  <!-- MediaPipe FaceMesh (CDN) -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-  <!-- Delaunay triangulation -->
-  <script src="https://cdn.jsdelivr.net/npm/delaunator@5.0.0/delaunator.min.js"></script>
 
-<script>
-  const $ = sel => document.querySelector(sel);
+  <script>
+    const srcFile = document.getElementById("srcFile");
+    const dstFile = document.getElementById("dstFile");
+    const srcCanvas = document.getElementById("srcCanvas");
+    const dstCanvas = document.getElementById("dstCanvas");
+    const outCanvas = document.getElementById("outCanvas");
+    const swapBtn = document.getElementById("swapBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const statusEl = document.getElementById("status");
 
-  const statusEl = $("#status");
-  const srcImg = $("#srcImg"), tgtImg = $("#tgtImg");
-  const outCanvas = $("#outCanvas"), ctxOut = outCanvas.getContext("2d");
-  const swapBtn = $("#swapBtn"), dlBtn = $("#downloadBtn");
+    const srcCtx = srcCanvas.getContext("2d");
+    const dstCtx = dstCanvas.getContext("2d");
+    const outCtx = outCanvas.getContext("2d");
 
-  let srcLoaded = false, tgtLoaded = false;
+    let srcImg = null, dstImg = null;
+    let srcLandmarks = null, dstLandmarks = null;
 
-  function setStatus(msg){ statusEl.textContent = msg; }
+    function setStatus(t){ statusEl.textContent = t; }
 
-  function loadImageToTag(file, imgTag, cb){
-    const r = new FileReader();
-    r.onload = e => {
-      imgTag.src = e.target.result;
-      imgTag.onload = () => cb && cb();
+    function readImage(file){
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.crossOrigin = "anonymous";
+        img.src = URL.createObjectURL(file);
+      });
+    }
+
+    function fitCanvasToImage(canvas, img){
+      canvas.width = img.naturalWidth || img.width;
+      canvas.height = img.naturalHeight || img.height;
+    }
+
+    function drawImageToCanvas(ctx, canvas, img){
+      fitCanvasToImage(canvas, img);
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(img, 0, 0);
+    }
+
+    // FaceMesh setup
+    const faceMesh = new FaceMesh.FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+
+    function detectLandmarks(img){
+      return new Promise((resolve) => {
+        const tmp = document.createElement("canvas");
+        tmp.width = img.naturalWidth || img.width;
+        tmp.height = img.naturalHeight || img.height;
+        const tctx = tmp.getContext("2d");
+        tctx.drawImage(img,0,0);
+
+        faceMesh.onResults((results) => {
+          if(results.multiFaceLandmarks && results.multiFaceLandmarks[0]){
+            const pts = results.multiFaceLandmarks[0].map(p => ({
+              x: p.x * tmp.width,
+              y: p.y * tmp.height
+            }));
+            resolve(pts);
+          } else {
+            resolve(null);
+          }
+        });
+
+        faceMesh.send({ image: tmp });
+      });
+    }
+
+    // Util: distancia e angulo
+    function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
+    function angle(a,b){ return Math.atan2(b.y-a.y, b.x-a.x); }
+
+    // Índices FaceMesh úteis
+    const IDX = {
+      leftEyeOuter: 33,
+      leftEyeInner: 133,
+      rightEyeInner: 362,
+      rightEyeOuter: 263,
+      noseTip: 1
     };
-    r.readAsDataURL(file);
-  }
 
-  $("#srcFile").addEventListener("change", e=>{
-    if(!e.target.files[0]) return;
-    loadImageToTag(e.target.files[0], srcImg, ()=>{
-      srcLoaded = true;
-      maybeEnable();
-    });
-  });
+    // Contorno do rosto (FaceMesh)
+    const faceOutline = [
+      10, 338, 297, 332, 284, 251, 389, 356, 454,
+      323, 361, 288, 397, 365, 379, 378, 400, 377,
+      152, 148, 176, 149, 150, 136, 172, 58, 132,
+      93, 234, 127, 162, 21
+    ];
 
-  $("#tgtFile").addEventListener("change", e=>{
-    if(!e.target.files[0]) return;
-    loadImageToTag(e.target.files[0], tgtImg, ()=>{
-      tgtLoaded = true;
-      maybeEnable();
-    });
-  });
+    // Cria máscara suave em canvas temporário (sem artefato)
+    function buildSoftMask(width, height, points, featherPx=12){
+      const mask = document.createElement("canvas");
+      mask.width = width;
+      mask.height = height;
+      const mctx = mask.getContext("2d");
 
-  function maybeEnable(){
-    if(srcLoaded && tgtLoaded){
-      swapBtn.disabled = false;
-      setStatus("Pronto para trocar. Clique em Swap Faces.");
+      mctx.clearRect(0,0,width,height);
+      mctx.save();
+      mctx.beginPath();
+
+      faceOutline.forEach((i, idx) => {
+        const p = points[i];
+        if(!p) return;
+        if(idx === 0) mctx.moveTo(p.x, p.y);
+        else mctx.lineTo(p.x, p.y);
+      });
+
+      mctx.closePath();
+      mctx.fillStyle = "white";
+      mctx.fill();
+
+      const blurred = document.createElement("canvas");
+      blurred.width = width;
+      blurred.height = height;
+      const bctx = blurred.getContext("2d");
+
+      bctx.filter = `blur(${featherPx}px)`;
+      bctx.drawImage(mask, 0, 0);
+
+      mctx.globalCompositeOperation = "source-in";
+      mctx.clearRect(0,0,width,height);
+      mctx.drawImage(blurred, 0, 0);
+
+      mctx.restore();
+      mctx.globalCompositeOperation = "source-over";
+      return mask;
     }
-  }
 
-  function assertMediapipeLoaded(){
-    if(typeof FaceMesh === "undefined" || typeof Delaunator === "undefined"){
-      throw new Error("Bibliotecas não carregaram. Verifique sua conexão e recarregue a página.");
-    }
-  }
+    // Ajuste simples de cor (aplica leve correção)
+    function applySoftColorMatch(srcFaceCtx, dstCtx, dstMask, strength=0.25){
+      // Bem simples: pega média aproximada (amostra) e corrige brilho/contraste levemente
+      const w = dstMask.width, h = dstMask.height;
+      const tmp = document.createElement("canvas");
+      tmp.width = w; tmp.height = h;
+      const tctx = tmp.getContext("2d");
 
-  assertMediapipeLoaded();
+      // Amostra do alvo (região da máscara)
+      tctx.clearRect(0,0,w,h);
+      tctx.drawImage(dstCtx.canvas, 0, 0);
+      tctx.globalCompositeOperation = "destination-in";
+      tctx.drawImage(dstMask, 0, 0);
 
-  const faceMesh = new FaceMesh({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-  });
-
-  faceMesh.setOptions({
-    maxNumFaces: 1,
-    refineLandmarks: true,
-    minDetectionConfidence: 0.5,
-    minTrackingConfidence: 0.5
-  });
-
-  let pendingResolve = null;
-  let pendingReject = null;
-
-  faceMesh.onResults((res) => {
-    if(!pendingResolve) return;
-
-    if(res.multiFaceLandmarks && res.multiFaceLandmarks.length){
-      pendingResolve(res.multiFaceLandmarks[0]);
-    }else{
-      pendingReject(new Error("Rosto não detectado. Tente outra foto com rosto mais frontal e iluminado."));
-    }
-    pendingResolve = null;
-    pendingReject = null;
-  });
-
-  async function getLandmarksFromImage(img){
-    const tmpCanvas = document.createElement("canvas");
-    const tctx = tmpCanvas.getContext("2d");
-    tmpCanvas.width = img.naturalWidth;
-    tmpCanvas.height = img.naturalHeight;
-    tctx.drawImage(img, 0, 0);
-
-    const lms = await new Promise((resolve, reject)=>{
-      pendingResolve = resolve;
-      pendingReject = reject;
-      faceMesh.send({ image: img });
-    });
-
-    const landmarks = lms.map(p => ({
-      x: p.x * tmpCanvas.width,
-      y: p.y * tmpCanvas.height
-    }));
-
-    return { landmarks, width: tmpCanvas.width, height: tmpCanvas.height, canvas: tmpCanvas };
-  }
-
-  function triangulate(points){
-    const coords = new Float64Array(points.length * 2);
-    for(let i=0;i<points.length;i++){
-      coords[i*2] = points[i].x;
-      coords[i*2+1] = points[i].y;
-    }
-    const dela = new Delaunator(coords);
-    return dela.triangles;
-  }
-
-  function drawTriangleWarp(srcCtx, dstCtx, srcTri, dstTri){
-    const [s0,s1,s2] = srcTri;
-    const [d0,d1,d2] = dstTri;
-
-    dstCtx.save();
-    dstCtx.beginPath();
-    dstCtx.moveTo(d0.x, d0.y);
-    dstCtx.lineTo(d1.x, d1.y);
-    dstCtx.lineTo(d2.x, d2.y);
-    dstCtx.closePath();
-    dstCtx.clip();
-
-    const denom = (s0.x*(s1.y - s2.y) + s1.x*(s2.y - s0.y) + s2.x*(s0.y - s1.y));
-    if(Math.abs(denom) < 1e-3){ dstCtx.restore(); return; }
-
-    const a = (d0.x*(s1.y - s2.y) + d1.x*(s2.y - s0.y) + d2.x*(s0.y - s1.y)) / denom;
-    const b = (d0.y*(s1.y - s2.y) + d1.y*(s2.y - s0.y) + d2.y*(s0.y - s1.y)) / denom;
-    const c = (d0.x*(s2.x - s1.x) + d1.x*(s0.x - s2.x) + d2.x*(s1.x - s0.x)) / denom;
-    const d = (d0.y*(s2.x - s1.x) + d1.y*(s0.x - s2.x) + d2.y*(s1.x - s0.x)) / denom;
-    const e = (d0.x*(s1.x*s2.y - s2.x*s1.y) + d1.x*(s2.x*s0.y - s0.x*s2.y) + d2.x*(s0.x*s1.y - s1.x*s0.y)) / denom;
-    const f = (d0.y*(s1.x*s2.y - s2.x*s1.y) + d1.y*(s2.x*s0.y - s0.x*s2.y) + d2.y*(s0.x*s1.y - s1.x*s0.y)) / denom;
-
-    dstCtx.transform(a, b, c, d, e, f);
-    dstCtx.drawImage(srcCtx.canvas, 0, 0);
-    dstCtx.restore();
-  }
-
-  function drawSoftMask(ctx, points, featherPx=10){
-    ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
-
-    const w = ctx.canvas.width, h = ctx.canvas.height;
-    const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
-    const minX = Math.max(0, Math.min(...xs)-15), maxX = Math.min(w, Math.max(...xs)+15);
-    const minY = Math.max(0, Math.min(...ys)-25), maxY = Math.min(h, Math.max(...ys)+15);
-
-    const cx = (minX+maxX)/2, cy = (minY+maxY)/2;
-    const rx = (maxX-minX)/2, ry = (maxY-minY)/2;
-    const steps = 72;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(255,255,255,1)";
-    ctx.beginPath();
-    for(let i=0;i<=steps;i++){
-      const t = i/steps * 2 * Math.PI;
-      const x = cx + rx * Math.cos(t);
-      const y = cy + ry * Math.sin(t);
-      if(i===0) ctx.moveTo(x,y);
-      else ctx.lineTo(x,y);
-    }
-    ctx.closePath();
-    ctx.fill();
-
-    if(featherPx > 0){
-      ctx.globalCompositeOperation = "destination-in";
-      const grad = ctx.createRadialGradient(cx, cy, Math.max(rx,ry)-featherPx, cx, cy, Math.max(rx,ry)+1);
-      grad.addColorStop(0, "rgba(255,255,255,1)");
-      grad.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(cx, cy, Math.max(rx,ry)+featherPx, 0, 2*Math.PI);
-      ctx.fill();
-      ctx.globalCompositeOperation = "source-over";
-    }
-    ctx.restore();
-  }
-
-  function colorMatchWarpToTarget(warpCtx, targetCtx, maskCtx){
-    const w = targetCtx.canvas.width, h = targetCtx.canvas.height;
-
-    const wData = warpCtx.getImageData(0,0,w,h);
-    const tData = targetCtx.getImageData(0,0,w,h);
-    const mData = maskCtx.getImageData(0,0,w,h);
-
-    const wd = wData.data, td = tData.data, md = mData.data;
-
-    function stats(arr, ch){
-      let sum=0, sum2=0, n=0;
-      for(let i=0;i<arr.length;i+=4){
-        if(md[i+3] > 10){
-          const v = arr[i+ch];
-          sum += v;
-          sum2 += v*v;
-          n++;
+      const img = tctx.getImageData(0,0,w,h).data;
+      let sum=0, count=0;
+      for(let i=0;i<img.length;i+=16){
+        const a = img[i+3];
+        if(a>10){
+          const r=img[i], g=img[i+1], b=img[i+2];
+          sum += (r+g+b)/3;
+          count++;
         }
       }
-      const mean = sum / Math.max(1,n);
-      const variance = (sum2 / Math.max(1,n)) - mean*mean;
-      const std = Math.sqrt(Math.max(1e-6, variance));
-      return { mean, std };
-    }
+      const targetAvg = count ? (sum/count) : 140;
 
-    const wsR = stats(wd,0), wsG = stats(wd,1), wsB = stats(wd,2);
-    const tsR = stats(td,0), tsG = stats(td,1), tsB = stats(td,2);
-
-    for(let i=0;i<wd.length;i+=4){
-      if(md[i+3] > 10 && wd[i+3] > 0){
-        wd[i]   = Math.max(0, Math.min(255, (wd[i]-wsR.mean)/wsR.std*tsR.std + tsR.mean ));
-        wd[i+1] = Math.max(0, Math.min(255, (wd[i+1]-wsG.mean)/wsG.std*tsG.std + tsG.mean ));
-        wd[i+2] = Math.max(0, Math.min(255, (wd[i+2]-wsB.mean)/wsB.std*tsB.std + tsB.mean ));
+      // Amostra do rosto fonte (já mascarado no canvas do rosto)
+      const sdata = srcFaceCtx.getImageData(0,0,w,h).data;
+      let ssum=0, scount=0;
+      for(let i=0;i<sdata.length;i+=16){
+        const a=sdata[i+3];
+        if(a>10){
+          const r=sdata[i], g=sdata[i+1], b=sdata[i+2];
+          ssum += (r+g+b)/3;
+          scount++;
+        }
       }
-    }
+      const srcAvg = scount ? (ssum/scount) : 140;
 
-    warpCtx.putImageData(wData, 0, 0);
-  }
+      const delta = (targetAvg - srcAvg) * strength;
 
-  async function doSwap(){
-    try{
-      swapBtn.disabled = true;
-      dlBtn.disabled = true;
-      setStatus("Detectando rostos...");
-
-      const src = await getLandmarksFromImage(srcImg);
-      const tgt = await getLandmarksFromImage(tgtImg);
-
-      outCanvas.width = tgt.width;
-      outCanvas.height = tgt.height;
-
-      const tgtBase = document.createElement("canvas").getContext("2d");
-      tgtBase.canvas.width = tgt.width;
-      tgtBase.canvas.height = tgt.height;
-      tgtBase.drawImage(tgtImg, 0, 0);
-
-      const srcCtx = src.canvas.getContext("2d");
-
-      const warp = document.createElement("canvas").getContext("2d");
-      warp.canvas.width = tgt.width;
-      warp.canvas.height = tgt.height;
-      warp.clearRect(0,0,tgt.width,tgt.height);
-
-      setStatus("Triangulando...");
-      const tris = triangulate(tgt.landmarks);
-
-      setStatus("Aplicando deformação...");
-      for(let i=0;i<tris.length;i+=3){
-        const ia = tris[i], ib = tris[i+1], ic = tris[i+2];
-        const dstTri = [tgt.landmarks[ia], tgt.landmarks[ib], tgt.landmarks[ic]];
-        const srcTri = [src.landmarks[ia], src.landmarks[ib], src.landmarks[ic]];
-        drawTriangleWarp(srcCtx, warp, srcTri, dstTri);
+      const id = srcFaceCtx.getImageData(0,0,w,h);
+      const d = id.data;
+      for(let i=0;i<d.length;i+=4){
+        if(d[i+3]>0){
+          d[i] = Math.max(0, Math.min(255, d[i] + delta));
+          d[i+1] = Math.max(0, Math.min(255, d[i+1] + delta));
+          d[i+2] = Math.max(0, Math.min(255, d[i+2] + delta));
+        }
       }
-
-      const mask = document.createElement("canvas").getContext("2d");
-      mask.canvas.width = tgt.width;
-      mask.canvas.height = tgt.height;
-      drawSoftMask(mask, tgt.landmarks, 14);
-
-      warp.globalCompositeOperation = "destination-in";
-      warp.drawImage(mask.canvas, 0, 0);
-      warp.globalCompositeOperation = "source-over";
-
-      colorMatchWarpToTarget(warp, tgtBase, mask);
-
-      ctxOut.clearRect(0,0,outCanvas.width,outCanvas.height);
-      ctxOut.drawImage(tgtBase.canvas, 0, 0);
-      ctxOut.drawImage(warp.canvas, 0, 0);
-
-      setStatus("Pronto. Se quiser, tente outras fotos com rosto bem visível.");
-      dlBtn.disabled = false;
-
-    }catch(err){
-      console.error(err);
-      setStatus("Falha: " + err.message);
-    }finally{
-      swapBtn.disabled = false;
+      srcFaceCtx.putImageData(id,0,0);
     }
-  }
 
-  swapBtn.addEventListener("click", doSwap);
+    function computeEyeTransform(srcPts, dstPts){
+      const srcL = srcPts[IDX.leftEyeOuter];
+      const srcR = srcPts[IDX.rightEyeOuter];
+      const dstL = dstPts[IDX.leftEyeOuter];
+      const dstR = dstPts[IDX.rightEyeOuter];
 
-  dlBtn.addEventListener("click", ()=>{
-    const a = document.createElement("a");
-    a.href = outCanvas.toDataURL("image/png");
-    a.download = "face-swap.png";
-    a.click();
-  });
-</script>
+      const srcCenter = { x:(srcL.x+srcR.x)/2, y:(srcL.y+srcR.y)/2 };
+      const dstCenter = { x:(dstL.x+dstR.x)/2, y:(dstL.y+dstR.y)/2 };
+
+      const srcD = dist(srcL, srcR);
+      const dstD = dist(dstL, dstR);
+
+      const scale = dstD / srcD;
+      const rot = angle(dstL, dstR) - angle(srcL, srcR);
+
+      return { srcCenter, dstCenter, scale, rot };
+    }
+
+    function doSwap(){
+      setStatus("Processando...");
+
+      // Base do resultado = alvo
+      outCanvas.width = dstCanvas.width;
+      outCanvas.height = dstCanvas.height;
+      outCtx.clearRect(0,0,outCanvas.width,outCanvas.height);
+      outCtx.drawImage(dstCanvas, 0, 0);
+
+      // Monta máscara do alvo
+      const mask = buildSoftMask(outCanvas.width, outCanvas.height, dstLandmarks, 12);
+
+      // Cria canvas do rosto fonte já alinhado
+      const face = document.createElement("canvas");
+      face.width = outCanvas.width;
+      face.height = outCanvas.height;
+      const fctx = face.getContext("2d");
+
+      const t = computeEyeTransform(srcLandmarks, dstLandmarks);
+
+      // Desenha a imagem fonte transformada no canvas do rosto
+      fctx.save();
+      fctx.translate(t.dstCenter.x, t.dstCenter.y);
+      fctx.rotate(t.rot);
+      fctx.scale(t.scale, t.scale);
+      fctx.translate(-t.srcCenter.x, -t.srcCenter.y);
+      fctx.drawImage(srcCanvas, 0, 0);
+      fctx.restore();
+
+      // Aplica máscara no rosto
+      fctx.globalCompositeOperation = "destination-in";
+      fctx.drawImage(mask, 0, 0);
+      fctx.globalCompositeOperation = "source-over";
+
+      // Ajuste de brilho leve pra casar com o alvo
+      applySoftColorMatch(fctx, dstCtx, mask, 0.28);
+
+      // Mistura no resultado
+      outCtx.save();
+      outCtx.globalAlpha = 0.98;
+      outCtx.drawImage(face, 0, 0);
+      outCtx.restore();
+
+      setStatus("Pronto. Se precisar, troque as fotos por outras mais parecidas.");
+      downloadBtn.disabled = false;
+    }
+
+    function updateButtons(){
+      const ok = !!(srcImg && dstImg && srcLandmarks && dstLandmarks);
+      swapBtn.disabled = !ok;
+      if(ok) setStatus("Pronto para trocar. Clique em Swap Faces.");
+    }
+
+    srcFile.addEventListener("change", async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      setStatus("Carregando imagem fonte...");
+      srcImg = await readImage(f);
+      drawImageToCanvas(srcCtx, srcCanvas, srcImg);
+      setStatus("Detectando rosto na fonte...");
+      srcLandmarks = await detectLandmarks(srcImg);
+      if(!srcLandmarks){
+        setStatus("Não detectei rosto na imagem fonte. Tente outra foto.");
+        swapBtn.disabled = true;
+        return;
+      }
+      setStatus("Fonte OK. Agora carregue a imagem alvo.");
+      updateButtons();
+    });
+
+    dstFile.addEventListener("change", async (e) => {
+      const f = e.target.files && e.target.files[0];
+      if(!f) return;
+      setStatus("Carregando imagem alvo...");
+      dstImg = await readImage(f);
+      drawImageToCanvas(dstCtx, dstCanvas, dstImg);
+      setStatus("Detectando rosto no alvo...");
+      dstLandmarks = await detectLandmarks(dstImg);
+      if(!dstLandmarks){
+        setStatus("Não detectei rosto na imagem alvo. Tente outra foto.");
+        swapBtn.disabled = true;
+        return;
+      }
+      setStatus("Alvo OK. Se a fonte também estiver OK, pode trocar.");
+      updateButtons();
+    });
+
+    swapBtn.addEventListener("click", () => {
+      try { doSwap(); }
+      catch(err){
+        console.error(err);
+        setStatus("Deu erro ao processar. Abra o console e me mande o erro se aparecer.");
+      }
+    });
+
+    downloadBtn.addEventListener("click", () => {
+      const a = document.createElement("a");
+      a.download = "face-swap.png";
+      a.href = outCanvas.toDataURL("image/png");
+      a.click();
+    });
+  </script>
 </body>
 </html>
