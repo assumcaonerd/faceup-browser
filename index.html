@@ -1,27 +1,27 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Face Swap – Browser Only</title>
-<style>
-  :root { color-scheme: dark light; }
-  body{font-family:system-ui,Arial,sans-serif; margin:24px; background:#0b1220; color:#e7eefc}
-  h1{margin:0 0 12px}
-  .grid{display:grid; gap:16px; grid-template-columns:1fr 1fr}
-  .card{background:#0e1a33; border:1px solid #213459; border-radius:16px; padding:12px}
-  .card h3{margin:6px 0 10px}
-  canvas, img{width:100%; max-height:60vh; object-fit:contain; background:#0b0f1d; border-radius:12px}
-  .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
-  button{background:#3b82f6; color:white; border:none; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer}
-  button[disabled]{opacity:.5; cursor:not-allowed}
-  .pill{font-size:12px; opacity:.85}
-  .footer{opacity:.8; margin-top:10px}
-  a{color:#8ab4ff}
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Face Swap - Browser Only</title>
+  <style>
+    :root { color-scheme: dark light; }
+    body{font-family:system-ui,Arial,sans-serif; margin:24px; background:#0b1220; color:#e7eefc}
+    h1{margin:0 0 12px}
+    .grid{display:grid; gap:16px; grid-template-columns:1fr 1fr}
+    .card{background:#0e1a33; border:1px solid #213459; border-radius:16px; padding:12px}
+    .card h3{margin:6px 0 10px}
+    canvas, img{width:100%; max-height:60vh; object-fit:contain; background:#0b0f1d; border-radius:12px}
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    button{background:#3b82f6; color:white; border:none; padding:10px 14px; border-radius:12px; font-weight:700; cursor:pointer}
+    button[disabled]{opacity:.5; cursor:not-allowed}
+    .pill{font-size:12px; opacity:.85}
+    .footer{opacity:.8; margin-top:10px}
+    a{color:#8ab4ff}
+  </style>
 </head>
 <body>
-  <h1>Face Swap – Browser</h1>
+  <h1>Face Swap - Browser</h1>
   <div class="row">
     <button id="swapBtn" disabled>Swap Faces</button>
     <button id="downloadBtn" disabled>Baixar PNG</button>
@@ -45,12 +45,12 @@
     <h3>Resultado</h3>
     <canvas id="outCanvas"></canvas>
     <div class="footer">
-      Dica: rostos de frente ou 3/4, boa iluminação. Pinte só o rosto (automático) — cabelo/orelhas ficam do ALVO.
+      Dica: rostos de frente ou 3/4, boa iluminação, cabeça inteira visível.
       Use com consentimento dos envolvidos.
     </div>
   </div>
 
-  <!-- MediaPipe FaceMesh (landmarks) -->
+  <!-- MediaPipe FaceMesh -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
@@ -58,276 +58,288 @@
   <script src="https://cdn.jsdelivr.net/npm/delaunator@5.0.0/delaunator.min.js"></script>
 
 <script>
-/* =========================
-   Utils
-========================= */
-const $ = sel => document.querySelector(sel);
-const statusEl = $("#status");
-const srcImg = $("#srcImg"), tgtImg = $("#tgtImg");
-const outCanvas = $("#outCanvas"), ctxOut = outCanvas.getContext("2d");
-const swapBtn = $("#swapBtn"), dlBtn = $("#downloadBtn");
+  const $ = sel => document.querySelector(sel);
 
-let srcLoaded=false, tgtLoaded=false;
+  const statusEl = $("#status");
+  const srcImg = $("#srcImg"), tgtImg = $("#tgtImg");
+  const outCanvas = $("#outCanvas"), ctxOut = outCanvas.getContext("2d");
+  const swapBtn = $("#swapBtn"), dlBtn = $("#downloadBtn");
 
-function loadImageToTag(file, imgTag, cb){
-  const r = new FileReader();
-  r.onload = e => { imgTag.src = e.target.result; imgTag.onload = () => cb?.(); };
-  r.readAsDataURL(file);
-}
+  let srcLoaded = false, tgtLoaded = false;
 
-$("#srcFile").addEventListener("change", e=>{
-  if(!e.target.files[0]) return;
-  loadImageToTag(e.target.files[0], srcImg, ()=>{srcLoaded=true; maybeEnable();});
-});
+  function setStatus(msg){ statusEl.textContent = msg; }
 
-$("#tgtFile").addEventListener("change", e=>{
-  if(!e.target.files[0]) return;
-  loadImageToTag(e.target.files[0], tgtImg, ()=>{tgtLoaded=true; maybeEnable();});
-});
-
-function maybeEnable(){
-  if(srcLoaded && tgtLoaded){
-    swapBtn.disabled=false;
-    statusEl.textContent="Pronto para trocar. Clique em ‘Swap Faces’.";
+  function loadImageToTag(file, imgTag, cb){
+    const r = new FileReader();
+    r.onload = e => {
+      imgTag.src = e.target.result;
+      imgTag.onload = () => cb && cb();
+    };
+    r.readAsDataURL(file);
   }
-}
 
-/* =========================
-   FaceMesh setup
-========================= */
-const faceMesh = new FaceMesh.FaceMesh({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-});
+  $("#srcFile").addEventListener("change", e=>{
+    if(!e.target.files[0]) return;
+    loadImageToTag(e.target.files[0], srcImg, ()=>{
+      srcLoaded = true;
+      maybeEnable();
+    });
+  });
 
-faceMesh.setOptions({
-  maxNumFaces: 1,
-  refineLandmarks: true,   // olhos/boca refinados
-  minDetectionConfidence: 0.5,
-  minTrackingConfidence: 0.5
-});
+  $("#tgtFile").addEventListener("change", e=>{
+    if(!e.target.files[0]) return;
+    loadImageToTag(e.target.files[0], tgtImg, ()=>{
+      tgtLoaded = true;
+      maybeEnable();
+    });
+  });
 
-function getLandmarksFromImage(img){
-  return new Promise((resolve,reject)=>{
+  function maybeEnable(){
+    if(srcLoaded && tgtLoaded){
+      swapBtn.disabled = false;
+      setStatus("Pronto para trocar. Clique em Swap Faces.");
+    }
+  }
+
+  function assertMediapipeLoaded(){
+    if(typeof FaceMesh === "undefined" || typeof Delaunator === "undefined"){
+      throw new Error("Bibliotecas não carregaram. Verifique sua conexão e recarregue a página.");
+    }
+  }
+
+  assertMediapipeLoaded();
+
+  const faceMesh = new FaceMesh({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  });
+
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  let pendingResolve = null;
+  let pendingReject = null;
+
+  faceMesh.onResults((res) => {
+    if(!pendingResolve) return;
+
+    if(res.multiFaceLandmarks && res.multiFaceLandmarks.length){
+      pendingResolve(res.multiFaceLandmarks[0]);
+    }else{
+      pendingReject(new Error("Rosto não detectado. Tente outra foto com rosto mais frontal e iluminado."));
+    }
+    pendingResolve = null;
+    pendingReject = null;
+  });
+
+  async function getLandmarksFromImage(img){
     const tmpCanvas = document.createElement("canvas");
     const tctx = tmpCanvas.getContext("2d");
     tmpCanvas.width = img.naturalWidth;
     tmpCanvas.height = img.naturalHeight;
-    tctx.drawImage(img,0,0);
-    faceMesh.onResults((res)=>{
-      if(res.multiFaceLandmarks && res.multiFaceLandmarks.length){
-        // Retorna [ {x,y,z} ... ] no espaço normalizado 0..1
-        const lm = res.multiFaceLandmarks[0].map(p=>({
-          x: p.x * tmpCanvas.width,
-          y: p.y * tmpCanvas.height
-        }));
-        resolve({landmarks: lm, width: tmpCanvas.width, height: tmpCanvas.height, canvas: tmpCanvas});
-      }else{
-        reject(new Error("Rosto não detectado."));
-      }
+    tctx.drawImage(img, 0, 0);
+
+    const lms = await new Promise((resolve, reject)=>{
+      pendingResolve = resolve;
+      pendingReject = reject;
+      faceMesh.send({ image: img });
     });
-    // MediaPipe espera uma imagem HTMLVideoElement/HTMLImageElement/HTMLCanvasElement
-    faceMesh.send({image: img});
-  });
-}
 
-/* =========================
-   Triangulation indices (468 pts). Usaremos subconjunto (malha densa)
-========================= */
-// Usaremos todos os pontos e deixamos Delaunay construir triângulos.
-function triangulate(points){
-  const coords = points.flatMap(p=>[p.x,p.y]);
-  const dela = new Delaunator(coords);
-  return dela.triangles; // indices em trincas
-}
+    const landmarks = lms.map(p => ({
+      x: p.x * tmpCanvas.width,
+      y: p.y * tmpCanvas.height
+    }));
 
-/* =========================
-   Affine warp por triângulos
-========================= */
-function drawTriangleWarp(srcCtx, dstCtx, srcTri, dstTri){
-  // srcTri/dstTri: [{x,y},{x,y},{x,y}]
-  // baseados em https://github.com/spite/ccapture.js/wiki/Canvas-affine-transform
-  // Matriz de transformação afim
-  const [s0,s1,s2] = srcTri, [d0,d1,d2] = dstTri;
-  dstCtx.save();
-  dstCtx.beginPath();
-  dstCtx.moveTo(d0.x, d0.y);
-  dstCtx.lineTo(d1.x, d1.y);
-  dstCtx.lineTo(d2.x, d2.y);
-  dstCtx.closePath();
-  dstCtx.clip();
-
-  // Resolver transform afim que mapeia src->dst
-  const denom = (s0.x*(s1.y - s2.y) + s1.x*(s2.y - s0.y) + s2.x*(s0.y - s1.y));
-  if (Math.abs(denom) < 1e-3){ dstCtx.restore(); return; }
-
-  const a = (d0.x*(s1.y - s2.y) + d1.x*(s2.y - s0.y) + d2.x*(s0.y - s1.y)) / denom;
-  const b = (d0.y*(s1.y - s2.y) + d1.y*(s2.y - s0.y) + d2.y*(s0.y - s1.y)) / denom;
-  const c = (d0.x*(s2.x - s1.x) + d1.x*(s0.x - s2.x) + d2.x*(s1.x - s0.x)) / denom;
-  const d = (d0.y*(s2.x - s1.x) + d1.y*(s0.x - s2.x) + d2.y*(s1.x - s0.x)) / denom;
-  const e = (d0.x*(s1.x*s2.y - s2.x*s1.y) + d1.x*(s2.x*s0.y - s0.x*s2.y) + d2.x*(s0.x*s1.y - s1.x*s0.y)) / denom;
-  const f = (d0.y*(s1.x*s2.y - s2.x*s1.y) + d1.y*(s2.x*s0.y - s0.x*s2.y) + d2.y*(s0.x*s1.y - s1.x*s0.y)) / denom;
-
-  dstCtx.transform(a, b, c, d, e, f);
-  // Desenhar a imagem de origem inteira; a clip limita ao triângulo
-  dstCtx.drawImage(srcCtx.canvas, 0, 0);
-  dstCtx.restore();
-}
-
-/* =========================
-   Máscara do rosto (feather)
-========================= */
-function drawSoftMask(ctx, points, featherPx=6){
-  ctx.save();
-  ctx.fillStyle="black";
-  ctx.globalCompositeOperation="destination-in";
-  ctx.beginPath();
-  // contorno aproximado: oval via hull de bochecha/queixo/testa (subconjunto dos landmarks)
-  // Pegamos um conjunto denso: bochechas 50..280 (aprox) – para simplificar, use oval automático:
-  const w = ctx.canvas.width, h = ctx.canvas.height;
-  // bounding box dos landmarks (com margem)
-  const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
-  const minX = Math.max(0, Math.min(...xs)-10), maxX = Math.min(w, Math.max(...xs)+10);
-  const minY = Math.max(0, Math.min(...ys)-20), maxY = Math.min(h, Math.max(...ys)+10);
-  // desenha oval
-  const cx = (minX+maxX)/2, cy = (minY+maxY)/2;
-  const rx = (maxX-minX)/2, ry = (maxY-minY)/2;
-  // caminho de oval
-  const steps=64;
-  for(let i=0;i<=steps;i++){
-    const t=i/steps*2*Math.PI;
-    const x = cx + rx*Math.cos(t);
-    const y = cy + ry*Math.sin(t);
-    i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    return { landmarks, width: tmpCanvas.width, height: tmpCanvas.height, canvas: tmpCanvas };
   }
-  ctx.closePath();
-  ctx.fill();
-  // feather leve nas bordas
-  if (featherPx>0){
-    ctx.globalCompositeOperation="destination-out";
-    const grad = ctx.createRadialGradient(cx,cy,Math.max(rx,ry)-featherPx,cx,cy,Math.max(rx,ry)+1);
-    grad.addColorStop(0,"transparent");
-    grad.addColorStop(1,"rgba(0,0,0,1)");
-    ctx.fillStyle=grad;
+
+  function triangulate(points){
+    const coords = new Float64Array(points.length * 2);
+    for(let i=0;i<points.length;i++){
+      coords[i*2] = points[i].x;
+      coords[i*2+1] = points[i].y;
+    }
+    const dela = new Delaunator(coords);
+    return dela.triangles;
+  }
+
+  function drawTriangleWarp(srcCtx, dstCtx, srcTri, dstTri){
+    const [s0,s1,s2] = srcTri;
+    const [d0,d1,d2] = dstTri;
+
+    dstCtx.save();
+    dstCtx.beginPath();
+    dstCtx.moveTo(d0.x, d0.y);
+    dstCtx.lineTo(d1.x, d1.y);
+    dstCtx.lineTo(d2.x, d2.y);
+    dstCtx.closePath();
+    dstCtx.clip();
+
+    const denom = (s0.x*(s1.y - s2.y) + s1.x*(s2.y - s0.y) + s2.x*(s0.y - s1.y));
+    if(Math.abs(denom) < 1e-3){ dstCtx.restore(); return; }
+
+    const a = (d0.x*(s1.y - s2.y) + d1.x*(s2.y - s0.y) + d2.x*(s0.y - s1.y)) / denom;
+    const b = (d0.y*(s1.y - s2.y) + d1.y*(s2.y - s0.y) + d2.y*(s0.y - s1.y)) / denom;
+    const c = (d0.x*(s2.x - s1.x) + d1.x*(s0.x - s2.x) + d2.x*(s1.x - s0.x)) / denom;
+    const d = (d0.y*(s2.x - s1.x) + d1.y*(s0.x - s2.x) + d2.y*(s1.x - s0.x)) / denom;
+    const e = (d0.x*(s1.x*s2.y - s2.x*s1.y) + d1.x*(s2.x*s0.y - s0.x*s2.y) + d2.x*(s0.x*s1.y - s1.x*s0.y)) / denom;
+    const f = (d0.y*(s1.x*s2.y - s2.x*s1.y) + d1.y*(s2.x*s0.y - s0.x*s2.y) + d2.y*(s0.x*s1.y - s1.x*s0.y)) / denom;
+
+    dstCtx.transform(a, b, c, d, e, f);
+    dstCtx.drawImage(srcCtx.canvas, 0, 0);
+    dstCtx.restore();
+  }
+
+  function drawSoftMask(ctx, points, featherPx=10){
+    ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    const xs = points.map(p=>p.x), ys = points.map(p=>p.y);
+    const minX = Math.max(0, Math.min(...xs)-15), maxX = Math.min(w, Math.max(...xs)+15);
+    const minY = Math.max(0, Math.min(...ys)-25), maxY = Math.min(h, Math.max(...ys)+15);
+
+    const cx = (minX+maxX)/2, cy = (minY+maxY)/2;
+    const rx = (maxX-minX)/2, ry = (maxY-minY)/2;
+    const steps = 72;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(255,255,255,1)";
     ctx.beginPath();
-    ctx.arc(cx,cy,Math.max(rx,ry)+featherPx,0,2*Math.PI);
+    for(let i=0;i<=steps;i++){
+      const t = i/steps * 2 * Math.PI;
+      const x = cx + rx * Math.cos(t);
+      const y = cy + ry * Math.sin(t);
+      if(i===0) ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
     ctx.fill();
+
+    if(featherPx > 0){
+      ctx.globalCompositeOperation = "destination-in";
+      const grad = ctx.createRadialGradient(cx, cy, Math.max(rx,ry)-featherPx, cx, cy, Math.max(rx,ry)+1);
+      grad.addColorStop(0, "rgba(255,255,255,1)");
+      grad.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(rx,ry)+featherPx, 0, 2*Math.PI);
+      ctx.fill();
+      ctx.globalCompositeOperation = "source-over";
+    }
+    ctx.restore();
   }
-  ctx.restore();
-}
 
-/* =========================
-   Correção de cor simples (match média e std)
-========================= */
-function colorMatch(srcCtx, dstCtx, maskCtx){
-  // Faz matching nos canais RGB dentro da máscara
-  const w = dstCtx.canvas.width, h = dstCtx.canvas.height;
-  const sData = srcCtx.getImageData(0,0,w,h), dData = dstCtx.getImageData(0,0,w,h), mData = maskCtx.getImageData(0,0,w,h);
-  const sArr = sData.data, dArr = dData.data, mArr = mData.data;
+  function colorMatchWarpToTarget(warpCtx, targetCtx, maskCtx){
+    const w = targetCtx.canvas.width, h = targetCtx.canvas.height;
 
-  function stats(arr, ch){
-    let sum=0, sum2=0, n=0;
-    for(let i=0;i<arr.length;i+=4){
-      if(mArr[i+3]>0){ // dentro da máscara
-        const v = arr[i+ch];
-        sum+=v; sum2+=v*v; n++;
+    const wData = warpCtx.getImageData(0,0,w,h);
+    const tData = targetCtx.getImageData(0,0,w,h);
+    const mData = maskCtx.getImageData(0,0,w,h);
+
+    const wd = wData.data, td = tData.data, md = mData.data;
+
+    function stats(arr, ch){
+      let sum=0, sum2=0, n=0;
+      for(let i=0;i<arr.length;i+=4){
+        if(md[i+3] > 10){
+          const v = arr[i+ch];
+          sum += v;
+          sum2 += v*v;
+          n++;
+        }
+      }
+      const mean = sum / Math.max(1,n);
+      const variance = (sum2 / Math.max(1,n)) - mean*mean;
+      const std = Math.sqrt(Math.max(1e-6, variance));
+      return { mean, std };
+    }
+
+    const wsR = stats(wd,0), wsG = stats(wd,1), wsB = stats(wd,2);
+    const tsR = stats(td,0), tsG = stats(td,1), tsB = stats(td,2);
+
+    for(let i=0;i<wd.length;i+=4){
+      if(md[i+3] > 10 && wd[i+3] > 0){
+        wd[i]   = Math.max(0, Math.min(255, (wd[i]-wsR.mean)/wsR.std*tsR.std + tsR.mean ));
+        wd[i+1] = Math.max(0, Math.min(255, (wd[i+1]-wsG.mean)/wsG.std*tsG.std + tsG.mean ));
+        wd[i+2] = Math.max(0, Math.min(255, (wd[i+2]-wsB.mean)/wsB.std*tsB.std + tsB.mean ));
       }
     }
-    const mean = sum/Math.max(1,n);
-    const std = Math.sqrt(Math.max(1e-6, sum2/Math.max(1,n) - mean*mean));
-    return {mean,std};
+
+    warpCtx.putImageData(wData, 0, 0);
   }
 
-  const sR=stats(sArr,0), sG=stats(sArr,1), sB=stats(sArr,2);
-  const dR=stats(dArr,0), dG=stats(dArr,1), dB=stats(dArr,2);
+  async function doSwap(){
+    try{
+      swapBtn.disabled = true;
+      dlBtn.disabled = true;
+      setStatus("Detectando rostos...");
 
-  const out = dData.data;
-  for(let i=0;i<out.length;i+=4){
-    if(mArr[i+3]>0){
-      // normaliza destino e aplica média/var da fonte
-      const r = (dArr[i]-dR.mean)/Math.max(1e-6,dR.std)*sR.std + sR.mean;
-      const g = (dArr[i+1]-dG.mean)/Math.max(1e-6,dG.std)*sG.std + sG.mean;
-      const b = (dArr[i+2]-dB.mean)/Math.max(1e-6,dB.std)*sB.std + sB.mean;
-      out[i]   = Math.max(0,Math.min(255,r));
-      out[i+1] = Math.max(0,Math.min(255,g));
-      out[i+2] = Math.max(0,Math.min(255,b));
-      out[i+3] = dArr[i+3];
+      const src = await getLandmarksFromImage(srcImg);
+      const tgt = await getLandmarksFromImage(tgtImg);
+
+      outCanvas.width = tgt.width;
+      outCanvas.height = tgt.height;
+
+      const tgtBase = document.createElement("canvas").getContext("2d");
+      tgtBase.canvas.width = tgt.width;
+      tgtBase.canvas.height = tgt.height;
+      tgtBase.drawImage(tgtImg, 0, 0);
+
+      const srcCtx = src.canvas.getContext("2d");
+
+      const warp = document.createElement("canvas").getContext("2d");
+      warp.canvas.width = tgt.width;
+      warp.canvas.height = tgt.height;
+      warp.clearRect(0,0,tgt.width,tgt.height);
+
+      setStatus("Triangulando...");
+      const tris = triangulate(tgt.landmarks);
+
+      setStatus("Aplicando deformação...");
+      for(let i=0;i<tris.length;i+=3){
+        const ia = tris[i], ib = tris[i+1], ic = tris[i+2];
+        const dstTri = [tgt.landmarks[ia], tgt.landmarks[ib], tgt.landmarks[ic]];
+        const srcTri = [src.landmarks[ia], src.landmarks[ib], src.landmarks[ic]];
+        drawTriangleWarp(srcCtx, warp, srcTri, dstTri);
+      }
+
+      const mask = document.createElement("canvas").getContext("2d");
+      mask.canvas.width = tgt.width;
+      mask.canvas.height = tgt.height;
+      drawSoftMask(mask, tgt.landmarks, 14);
+
+      warp.globalCompositeOperation = "destination-in";
+      warp.drawImage(mask.canvas, 0, 0);
+      warp.globalCompositeOperation = "source-over";
+
+      colorMatchWarpToTarget(warp, tgtBase, mask);
+
+      ctxOut.clearRect(0,0,outCanvas.width,outCanvas.height);
+      ctxOut.drawImage(tgtBase.canvas, 0, 0);
+      ctxOut.drawImage(warp.canvas, 0, 0);
+
+      setStatus("Pronto. Se quiser, tente outras fotos com rosto bem visível.");
+      dlBtn.disabled = false;
+
+    }catch(err){
+      console.error(err);
+      setStatus("Falha: " + err.message);
+    }finally{
+      swapBtn.disabled = false;
     }
   }
-  dstCtx.putImageData(dData,0,0);
-}
 
-/* =========================
-   Main swap
-========================= */
-async function doSwap(){
-  try{
-    swapBtn.disabled=true; dlBtn.disabled=true;
-    statusEl.textContent="Detectando rostos...";
-    // Landmarks
-    const src = await getLandmarksFromImage(srcImg);
-    const tgt = await getLandmarksFromImage(tgtImg);
+  swapBtn.addEventListener("click", doSwap);
 
-    // Canvas de trabalho (origens)
-    const srcCtx = src.canvas.getContext("2d");
-    const tgtCtx = document.createElement("canvas").getContext("2d");
-    tgtCtx.canvas.width = tgt.width; tgtCtx.canvas.height = tgt.height;
-    tgtCtx.drawImage(tgtImg,0,0);
-
-    // Saída = cópia do alvo
-    outCanvas.width = tgt.width; outCanvas.height = tgt.height;
-    ctxOut.clearRect(0,0,outCanvas.width,outCanvas.height);
-    ctxOut.drawImage(tgtImg,0,0);
-
-    statusEl.textContent="Triangulando...";
-    const tris = triangulate(tgt.landmarks);
-
-    statusEl.textContent="Aplicando warp por triângulos...";
-    // Warp cada triângulo do rosto da fonte para o alvo
-    for(let i=0;i<tris.length;i+=3){
-      const ia = tris[i], ib = tris[i+1], ic = tris[i+2];
-      const dstTri = [tgt.landmarks[ia], tgt.landmarks[ib], tgt.landmarks[ic]];
-      const srcTri = [src.landmarks[ia], src.landmarks[ib], src.landmarks[ic]];
-      drawTriangleWarp(srcCtx, ctxOut, srcTri, dstTri);
-    }
-
-    // Criar máscara suave do rosto (para aparecer cabelo/orelhas do alvo)
-    const mask = document.createElement("canvas").getContext("2d");
-    mask.canvas.width = tgt.width; mask.canvas.height = tgt.height;
-    drawSoftMask(mask, tgt.landmarks, 8);
-
-    // Aplicar máscara (mantendo só a área do rosto trocado)
-    const blended = document.createElement("canvas").getContext("2d");
-    blended.canvas.width=tgt.width; blended.canvas.height=tgt.height;
-    blended.drawImage(ctxOut.canvas,0,0);
-    blended.globalCompositeOperation="destination-in";
-    blended.drawImage(mask.canvas,0,0);
-
-    // Sobrepor no alvo original
-    ctxOut.clearRect(0,0,outCanvas.width,outCanvas.height);
-    ctxOut.drawImage(tgtImg,0,0);
-    ctxOut.globalCompositeOperation="source-over";
-    ctxOut.drawImage(blended.canvas,0,0);
-
-    // Correção de cor leve (para equalizar pele)
-    colorMatch(srcCtx, ctxOut, mask);
-
-    statusEl.textContent="Pronto! Se quiser, ajuste as imagens e tente novamente.";
-    dlBtn.disabled=false;
-  }catch(err){
-    console.error(err);
-    statusEl.textContent = "Falha: " + err.message + " (Tente outra foto com rosto mais frontal e iluminado.)";
-  }finally{
-    swapBtn.disabled=false;
-  }
-}
-
-swapBtn.addEventListener("click", doSwap);
-dlBtn.addEventListener("click", ()=>{
-  const a = document.createElement("a");
-  a.href = outCanvas.toDataURL("image/png");
-  a.download = "face-swap.png";
-  a.click();
-});
+  dlBtn.addEventListener("click", ()=>{
+    const a = document.createElement("a");
+    a.href = outCanvas.toDataURL("image/png");
+    a.download = "face-swap.png";
+    a.click();
+  });
 </script>
 </body>
 </html>
