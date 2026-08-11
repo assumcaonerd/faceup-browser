@@ -8,6 +8,7 @@
     <title>FaceUp Browser</title>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="stylesheet" href="./src/styles.css" />
+    <link rel="stylesheet" href="./src/generative.css" />
     <script type="importmap">
       {"imports":{"@mediapipe/tasks-vision":"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs"}}
     </script>
@@ -62,6 +63,11 @@
 
       <section class="controls-card" aria-labelledby="controlsTitle">
         <div class="section-title"><div><p class="eyebrow">Acabamento</p><h2 id="controlsTitle">Ajustes do resultado</h2></div><button id="resetControls" class="text-button" type="button">Restaurar padrão</button></div>
+        <fieldset class="mode-control">
+          <legend>Modo de processamento</legend>
+          <label><input type="radio" name="processingMode" value="generative" disabled /><span><strong>Generativo</strong><small id="generativeAvailability">Verificando disponibilidade do backend…</small></span></label>
+          <label><input type="radio" name="processingMode" value="local" checked /><span><strong>Local e privado</strong><small>Processa neste dispositivo e preserva o formato do cabelo de destino.</small></span></label>
+        </fieldset>
         <div class="controls-grid">
           <label><span>Suavização <output id="featherValue">34</output></span><input id="feather" type="range" min="4" max="60" value="34" /></label>
           <label><span>Correção de cor <output id="colorValue">65%</output></span><input id="colorMatch" type="range" min="0" max="100" value="65" /></label>
@@ -82,7 +88,7 @@
       </section>
     </main>
 
-    <footer><div class="shell"><span>FaceUp Browser</span><span>Processamento local. Use imagens com autorização.</span></div></footer>
+    <footer><div class="shell"><span>FaceUp Browser</span><span>O modo generativo envia as imagens ao provedor configurado. Use imagens com autorização.</span></div></footer>
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>
