@@ -35,18 +35,23 @@ async function decodeImage(file) {
   return canvas;
 }
 
-const faceMesh = new globalThis.FaceMesh({
-  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
-});
-faceMesh.setOptions({ maxNumFaces: 1, refineLandmarks: true, staticImageMode: true, minDetectionConfidence: 0.65 });
-let pendingDetection;
-faceMesh.onResults((results) => { pendingDetection?.(results.multiFaceLandmarks?.[0] ?? null); pendingDetection = null; });
-
-async function detectFace(canvas) {
-  const normalized = await new Promise((resolve, reject) => {
-    pendingDetection = resolve;
-    faceMesh.send({ image: canvas }).catch((error) => { pendingDetection = null; reject(error); });
+function createFaceDetector() {
+  const detector = new globalThis.FaceMesh({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
   });
+  detector.setOptions({ maxNumFaces: 1, refineLandmarks: true, staticImageMode: true, minDetectionConfidence: 0.5 });
+  return detector;
+}
+const detectors = { source: createFaceDetector(), target: createFaceDetector() };
+
+async function detectFace(canvas, kind) {
+  const detector = detectors[kind];
+  const detection = new Promise((resolve, reject) => {
+    detector.onResults((results) => resolve(results.multiFaceLandmarks?.[0] ?? null));
+    detector.send({ image: canvas }).catch(reject);
+  });
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('A detecção facial demorou demais. Verifique sua conexão e tente novamente.')), 25000));
+  const normalized = await Promise.race([detection, timeout]);
   return normalized?.map((point) => ({ x: point.x * canvas.width, y: point.y * canvas.height })) ?? null;
 }
 
@@ -64,7 +69,7 @@ async function loadSlot(kind, file) {
     setStatus(`Lendo a imagem de ${label}`, 'Ajustando tamanho e orientação…', 25, '…');
     const image = await decodeImage(file); renderPreview(image, elements[`${kind}Canvas`]);
     setStatus('Localizando o rosto', `Analisando a foto de ${label} neste dispositivo…`, 52, '…');
-    const points = await detectFace(image);
+    const points = await detectFace(image, kind);
     if (!points) throw new Error(`Nenhum rosto foi encontrado na imagem de ${label}. Tente uma foto frontal e nítida.`);
     state[kind] = image; state[`${kind}Points`] = points;
     const ready = state.sourcePoints && state.targetPoints;
