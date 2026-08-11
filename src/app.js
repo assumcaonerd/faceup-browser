@@ -9,9 +9,10 @@ const elements = {
   compareButton: $('#compareButton'), resultSection: $('#resultSection'), statusIcon: $('#statusIcon'),
   statusTitle: $('#statusTitle'), statusText: $('#statusText'), progressBar: $('#progressBar'),
   feather: $('#feather'), colorMatch: $('#colorMatch'), opacity: $('#opacity'), includeHair: $('#includeHair'),
+  processingModes: [...document.querySelectorAll('input[name="processingMode"]')],
 };
 
-const state = { source: null, target: null, sourcePoints: null, targetPoints: null, sourceParts: null, targetParts: null, busy: false, result: null };
+const state = { source: null, target: null, sourceFile: null, targetFile: null, sourcePoints: null, targetPoints: null, sourceParts: null, targetParts: null, busy: false, result: null };
 const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
 
 function setStatus(title, text, progress = 10, icon = '1') {
@@ -91,7 +92,7 @@ async function loadSlot(kind, file) {
     const points = await detectFace(image);
     const parts = await segmentParts(image);
     if (!points) throw new Error(`Nenhum rosto foi encontrado na imagem de ${label}. Tente uma foto frontal e nítida.`);
-    state[kind] = image; state[`${kind}Points`] = points; state[`${kind}Parts`] = parts;
+    state[kind] = image; state[`${kind}File`] = file; state[`${kind}Points`] = points; state[`${kind}Parts`] = parts;
     const ready = state.sourcePoints && state.targetPoints;
     setStatus(ready ? 'Tudo pronto' : 'Primeiro rosto detectado', ready ? 'Ajuste os controles ou crie o resultado.' : 'Agora escolha a outra imagem.', ready ? 100 : 60, ready ? '✓' : '2');
     elements.processButton.disabled = !ready;
@@ -155,7 +156,15 @@ function meanColor(canvas, points) {
   return n ? [r/n,g/n,b/n] : [128,128,128];
 }
 
-function processSwap() {
+function finishResult(canvas) {
+  const rendered=document.createElement('canvas'); rendered.width=canvas.width; rendered.height=canvas.height; rendered.getContext('2d').drawImage(canvas,0,0);
+  const result=elements.resultCanvas; result.width=rendered.width; result.height=rendered.height; result.getContext('2d').drawImage(rendered,0,0);
+  const saved=document.createElement('canvas'); saved.width=result.width; saved.height=result.height; saved.getContext('2d').drawImage(result,0,0);
+  state.result=saved; elements.resultSection.hidden=false; setStatus('Resultado concluído','Compare com a foto original ou baixe em alta resolução.',100,'✓');
+  elements.resultSection.scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function processLocalSwap() {
   try {
     setStatus('Criando o resultado', 'Alinhando a malha e combinando luz e cor…', 75, '…');
     const warped=createWarpedFace(); const result=elements.resultCanvas; result.width=state.target.width; result.height=state.target.height;
@@ -169,10 +178,35 @@ function processSwap() {
     mctx.filter=`blur(${elements.feather.value}px)`; ovalPath(mctx,state.targetPoints); mctx.fillStyle='#fff'; mctx.fill();
     cctx.globalCompositeOperation='destination-in'; cctx.drawImage(mask,0,0); cctx.globalCompositeOperation='source-over';
     ctx.globalAlpha=Number(elements.opacity.value)/100; ctx.drawImage(colored,0,0); ctx.globalAlpha=1;
-    const saved=document.createElement('canvas'); saved.width=result.width; saved.height=result.height; saved.getContext('2d').drawImage(result,0,0);
-    state.result=saved; elements.resultSection.hidden=false; setStatus('Resultado concluído','Compare com a foto original ou baixe em alta resolução.',100,'✓');
-    elements.resultSection.scrollIntoView({behavior:'smooth',block:'start'});
+    finishResult(result);
   } catch(error) { console.error(error); setStatus('Erro ao criar o resultado','Atualize a página e tente novamente com outras fotos.',10,'!'); }
+}
+
+async function decodeGeneratedImage(base64, mimeType) {
+  const response=await fetch(`data:${mimeType};base64,${base64}`); const blob=await response.blob(); const bitmap=await createImageBitmap(blob);
+  const canvas=document.createElement('canvas'); canvas.width=bitmap.width; canvas.height=bitmap.height; canvas.getContext('2d').drawImage(bitmap,0,0); bitmap.close(); return canvas;
+}
+
+async function processGenerativeSwap() {
+  state.busy=true; elements.processButton.disabled=true;
+  try {
+    setStatus('Criando rosto e penteado','Enviando as duas imagens ao backend generativo. Isso pode levar alguns minutos…',35,'…');
+    const form=new FormData(); form.append('target',state.targetFile); form.append('source',state.sourceFile); form.append('includeHair',String(elements.includeHair.checked));
+    const response=await fetch('/api/generative-swap',{method:'POST',body:form,signal:AbortSignal.timeout(240_000)}); const payload=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(payload.error||`Falha no backend generativo (${response.status}).`);
+    setStatus('Finalizando a imagem','Preparando a visualização em alta resolução…',90,'…'); finishResult(await decodeGeneratedImage(payload.image,payload.mimeType||'image/png'));
+  } catch(error) {
+    console.error(error); setStatus('Modo generativo indisponível',`${error.message} Se preferir, selecione o modo local e tente novamente.`,10,'!');
+  } finally { state.busy=false; elements.processButton.disabled=false; }
+}
+
+function selectedMode(){return elements.processingModes.find((input)=>input.checked)?.value||'local';}
+function processSwap(){if(state.busy)return;if(selectedMode()==='generative')processGenerativeSwap();else processLocalSwap();}
+
+async function detectGenerativeAvailability(){
+  const input=elements.processingModes.find((item)=>item.value==='generative'); const note=$('#generativeAvailability');
+  try{const response=await fetch('/api/generative-swap',{headers:{Accept:'application/json'}});const payload=await response.json();if(!response.ok||!payload.available)throw new Error();input.disabled=false;input.checked=true;note.textContent=`Disponível com ${payload.model||'modelo generativo'}. Transfere rosto e penteado completos.`;}
+  catch{input.disabled=true;note.textContent='Backend não configurado. O modo local continua disponível.';}
 }
 
 function bindDrop(card,input,kind){['dragenter','dragover'].forEach(e=>card.addEventListener(e,(event)=>{event.preventDefault();card.classList.add('dragging')}));['dragleave','drop'].forEach(e=>card.addEventListener(e,(event)=>{event.preventDefault();card.classList.remove('dragging')}));card.addEventListener('drop',(event)=>loadSlot(kind,event.dataTransfer.files[0]));input.addEventListener('change',()=>loadSlot(kind,input.files[0]));card.querySelector('.replace-button').addEventListener('click',(event)=>{event.preventDefault();input.click()});}
@@ -183,3 +217,4 @@ function showOriginal(show){if(!state.target||!state.result)return;const ctx=ele
 ['pointerdown','keydown'].forEach(e=>elements.compareButton.addEventListener(e,event=>{if(e==='keydown'&&!['Enter',' '].includes(event.key))return;showOriginal(true)}));['pointerup','pointerleave','keyup'].forEach(e=>elements.compareButton.addEventListener(e,()=>showOriginal(false)));
 [['feather','featherValue',''],['colorMatch','colorValue','%'],['opacity','opacityValue','%']].forEach(([id,out,suffix])=>elements[id].addEventListener('input',()=>{$(`#${out}`).value=`${elements[id].value}${suffix}`}));
 $('#resetControls').addEventListener('click',()=>{elements.feather.value=34;elements.colorMatch.value=65;elements.opacity.value=100;$('#featherValue').value='34';$('#colorValue').value='65%';$('#opacityValue').value='100%'});
+detectGenerativeAvailability();
