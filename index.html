@@ -1,386 +1,86 @@
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Face Swap - Browser Only</title>
-  <style>
-    :root { color-scheme: dark; }
-    body{
-      margin:24px;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background:#0b1220; color:#e7eefc;
-    }
-    h1{ margin:0 0 12px 0; font-size:28px; }
-    .row{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:8px 0 18px 0; }
-    button{
-      background:#3b82f6; color:white; border:none;
-      padding:10px 14px; border-radius:12px; font-weight:700;
-      cursor:pointer;
-    }
-    button:disabled{ opacity:.45; cursor:not-allowed; }
-    .pill{ font-size:12px; opacity:.9; padding:6px 10px; border-radius:999px; background:#0e1a33; border:1px solid #1f2b52; }
-    .grid{ display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
-    .card{
-      background:#0e1a33; border:1px solid #213459;
-      border-radius:16px; padding:12px;
-    }
-    .card h3{ margin:6px 0 10px 0; font-size:14px; opacity:.95; }
-    .card input{ margin-bottom:10px; }
-    canvas{
-      width:100%; height:auto; max-height:62vh; object-fit:contain;
-      background:#060b16; border-radius:12px; border:1px solid #1f2b52;
-    }
-    .outWrap{ margin-top:16px; }
-    .note{ font-size:12px; opacity:.8; margin-top:8px; }
-    .warn{ color:#fbbf24; }
-  </style>
-</head>
-<body>
-  <h1>Face Swap - Browser</h1>
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Troca de rostos privada, executada integralmente no navegador." />
+    <meta name="theme-color" content="#07111f" />
+    <title>FaceUp Browser</title>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="nav shell" aria-label="Navegação principal">
+        <a class="brand" href="#" aria-label="FaceUp Browser, início">
+          <span class="brand-mark" aria-hidden="true">F</span>
+          <span>FaceUp <strong>Browser</strong></span>
+        </a>
+        <span class="privacy-badge"><span aria-hidden="true">●</span> 100% local e privado</span>
+      </nav>
+      <div class="hero-content shell">
+        <p class="eyebrow">Face swap no navegador</p>
+        <h1>Troque rostos com privacidade e controle.</h1>
+        <p>Suas imagens são processadas neste dispositivo. Nenhuma foto é enviada para um servidor.</p>
+      </div>
+    </header>
 
-  <div class="row">
-    <button id="swapBtn" disabled>Swap Faces</button>
-    <button id="downloadBtn" disabled>Baixar PNG</button>
-    <span id="status" class="pill">Carregue as duas imagens.</span>
-    <span class="pill warn">Dica: fotos com angulo e luz parecidos ficam muito melhores.</span>
-  </div>
+    <main class="shell workspace">
+      <section class="status-panel" aria-live="polite">
+        <div class="status-icon" id="statusIcon" aria-hidden="true">1</div>
+        <div>
+          <strong id="statusTitle">Escolha duas imagens</strong>
+          <p id="statusText">Comece pela foto com o rosto que deseja usar e depois escolha a foto de destino.</p>
+        </div>
+        <div class="progress" aria-hidden="true"><span id="progressBar"></span></div>
+      </section>
 
-  <div class="grid">
-    <div class="card">
-      <h3>Imagem FONTE (rosto que entra)</h3>
-      <input type="file" id="srcFile" accept="image/*" />
-      <canvas id="srcCanvas"></canvas>
-      <div class="note">Apenas detectamos o rosto no navegador. Nada é enviado.</div>
-    </div>
+      <section class="upload-grid" aria-label="Seleção de imagens">
+        <article class="upload-card" id="sourceDrop">
+          <div class="card-heading"><span class="step">1</span><div><h2>Rosto de origem</h2><p>O rosto que será aplicado</p></div></div>
+          <label class="drop-zone" for="sourceInput">
+            <input id="sourceInput" type="file" accept="image/jpeg,image/png,image/webp" />
+            <canvas id="sourceCanvas" hidden></canvas>
+            <span class="drop-placeholder"><span class="upload-icon" aria-hidden="true">↑</span><strong>Solte uma foto aqui</strong><small>ou clique para escolher · JPG, PNG ou WebP</small></span>
+            <button class="replace-button" type="button" hidden>Trocar imagem</button>
+          </label>
+        </article>
 
-    <div class="card">
-      <h3>Imagem ALVO (foto final)</h3>
-      <input type="file" id="dstFile" accept="image/*" />
-      <canvas id="dstCanvas"></canvas>
-      <div class="note">O resultado aparece abaixo.</div>
-    </div>
-  </div>
+        <article class="upload-card" id="targetDrop">
+          <div class="card-heading"><span class="step">2</span><div><h2>Foto de destino</h2><p>A imagem que receberá o rosto</p></div></div>
+          <label class="drop-zone" for="targetInput">
+            <input id="targetInput" type="file" accept="image/jpeg,image/png,image/webp" />
+            <canvas id="targetCanvas" hidden></canvas>
+            <span class="drop-placeholder"><span class="upload-icon" aria-hidden="true">↑</span><strong>Solte uma foto aqui</strong><small>ou clique para escolher · JPG, PNG ou WebP</small></span>
+            <button class="replace-button" type="button" hidden>Trocar imagem</button>
+          </label>
+        </article>
+      </section>
 
-  <div class="card outWrap">
-    <h3>Resultado</h3>
-    <canvas id="outCanvas"></canvas>
-    <div class="note">
-      Se ficar "colado" ou estranho, quase sempre é angulo, tamanho e luz diferentes. Este app melhora isso, mas não faz milagre.
-    </div>
-  </div>
+      <section class="controls-card" aria-labelledby="controlsTitle">
+        <div class="section-title"><div><p class="eyebrow">Acabamento</p><h2 id="controlsTitle">Ajustes do resultado</h2></div><button id="resetControls" class="text-button" type="button">Restaurar padrão</button></div>
+        <div class="controls-grid">
+          <label><span>Suavização <output id="featherValue">24</output></span><input id="feather" type="range" min="4" max="50" value="24" /></label>
+          <label><span>Correção de cor <output id="colorValue">65%</output></span><input id="colorMatch" type="range" min="0" max="100" value="65" /></label>
+          <label><span>Opacidade <output id="opacityValue">100%</output></span><input id="opacity" type="range" min="50" max="100" value="100" /></label>
+        </div>
+        <button id="processButton" class="primary-button" type="button" disabled><span aria-hidden="true">✦</span> Criar face swap</button>
+      </section>
 
-  <!-- MediaPipe FaceMesh (CDN) -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+      <section class="result-card" id="resultSection" hidden aria-labelledby="resultTitle">
+        <div class="section-title"><div><p class="eyebrow">Resultado</p><h2 id="resultTitle">Sua imagem está pronta</h2></div><div class="result-actions"><button id="compareButton" class="secondary-button" type="button">Segure para comparar</button><button id="downloadButton" class="primary-button compact" type="button">Baixar PNG</button></div></div>
+        <div class="result-stage"><canvas id="resultCanvas"></canvas><span class="comparison-label" id="comparisonLabel" hidden>Original</span></div>
+      </section>
 
-  <script>
-    const srcFile = document.getElementById("srcFile");
-    const dstFile = document.getElementById("dstFile");
-    const srcCanvas = document.getElementById("srcCanvas");
-    const dstCanvas = document.getElementById("dstCanvas");
-    const outCanvas = document.getElementById("outCanvas");
-    const swapBtn = document.getElementById("swapBtn");
-    const downloadBtn = document.getElementById("downloadBtn");
-    const statusEl = document.getElementById("status");
+      <section class="tips">
+        <h2>Para um resultado melhor</h2>
+        <div class="tip-grid"><p><span>01</span>Use fotos nítidas e com o rosto visível.</p><p><span>02</span>Prefira ângulos e expressões semelhantes.</p><p><span>03</span>Escolha imagens com iluminação parecida.</p></div>
+      </section>
+    </main>
 
-    const srcCtx = srcCanvas.getContext("2d");
-    const dstCtx = dstCanvas.getContext("2d");
-    const outCtx = outCanvas.getContext("2d");
-
-    let srcImg = null, dstImg = null;
-    let srcLandmarks = null, dstLandmarks = null;
-
-    function setStatus(t){ statusEl.textContent = t; }
-
-    function readImage(file){
-      return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => resolve(img);
-        img.onerror = reject;
-        img.crossOrigin = "anonymous";
-        img.src = URL.createObjectURL(file);
-      });
-    }
-
-    function fitCanvasToImage(canvas, img){
-      canvas.width = img.naturalWidth || img.width;
-      canvas.height = img.naturalHeight || img.height;
-    }
-
-    function drawImageToCanvas(ctx, canvas, img){
-      fitCanvasToImage(canvas, img);
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.drawImage(img, 0, 0);
-    }
-
-    // FaceMesh setup
-    const faceMesh = new FaceMesh.FaceMesh({
-      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
-    });
-
-    faceMesh.setOptions({
-      maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5
-    });
-
-    function detectLandmarks(img){
-      return new Promise((resolve) => {
-        const tmp = document.createElement("canvas");
-        tmp.width = img.naturalWidth || img.width;
-        tmp.height = img.naturalHeight || img.height;
-        const tctx = tmp.getContext("2d");
-        tctx.drawImage(img,0,0);
-
-        faceMesh.onResults((results) => {
-          if(results.multiFaceLandmarks && results.multiFaceLandmarks[0]){
-            const pts = results.multiFaceLandmarks[0].map(p => ({
-              x: p.x * tmp.width,
-              y: p.y * tmp.height
-            }));
-            resolve(pts);
-          } else {
-            resolve(null);
-          }
-        });
-
-        faceMesh.send({ image: tmp });
-      });
-    }
-
-    // Util: distancia e angulo
-    function dist(a,b){ const dx=a.x-b.x, dy=a.y-b.y; return Math.hypot(dx,dy); }
-    function angle(a,b){ return Math.atan2(b.y-a.y, b.x-a.x); }
-
-    // Índices FaceMesh úteis
-    const IDX = {
-      leftEyeOuter: 33,
-      leftEyeInner: 133,
-      rightEyeInner: 362,
-      rightEyeOuter: 263,
-      noseTip: 1
-    };
-
-    // Contorno do rosto (FaceMesh)
-    const faceOutline = [
-      10, 338, 297, 332, 284, 251, 389, 356, 454,
-      323, 361, 288, 397, 365, 379, 378, 400, 377,
-      152, 148, 176, 149, 150, 136, 172, 58, 132,
-      93, 234, 127, 162, 21
-    ];
-
-    // Cria máscara suave em canvas temporário (sem artefato)
-    function buildSoftMask(width, height, points, featherPx=12){
-      const mask = document.createElement("canvas");
-      mask.width = width;
-      mask.height = height;
-      const mctx = mask.getContext("2d");
-
-      mctx.clearRect(0,0,width,height);
-      mctx.save();
-      mctx.beginPath();
-
-      faceOutline.forEach((i, idx) => {
-        const p = points[i];
-        if(!p) return;
-        if(idx === 0) mctx.moveTo(p.x, p.y);
-        else mctx.lineTo(p.x, p.y);
-      });
-
-      mctx.closePath();
-      mctx.fillStyle = "white";
-      mctx.fill();
-
-      const blurred = document.createElement("canvas");
-      blurred.width = width;
-      blurred.height = height;
-      const bctx = blurred.getContext("2d");
-
-      bctx.filter = `blur(${featherPx}px)`;
-      bctx.drawImage(mask, 0, 0);
-
-      mctx.globalCompositeOperation = "source-in";
-      mctx.clearRect(0,0,width,height);
-      mctx.drawImage(blurred, 0, 0);
-
-      mctx.restore();
-      mctx.globalCompositeOperation = "source-over";
-      return mask;
-    }
-
-    // Ajuste simples de cor (aplica leve correção)
-    function applySoftColorMatch(srcFaceCtx, dstCtx, dstMask, strength=0.25){
-      // Bem simples: pega média aproximada (amostra) e corrige brilho/contraste levemente
-      const w = dstMask.width, h = dstMask.height;
-      const tmp = document.createElement("canvas");
-      tmp.width = w; tmp.height = h;
-      const tctx = tmp.getContext("2d");
-
-      // Amostra do alvo (região da máscara)
-      tctx.clearRect(0,0,w,h);
-      tctx.drawImage(dstCtx.canvas, 0, 0);
-      tctx.globalCompositeOperation = "destination-in";
-      tctx.drawImage(dstMask, 0, 0);
-
-      const img = tctx.getImageData(0,0,w,h).data;
-      let sum=0, count=0;
-      for(let i=0;i<img.length;i+=16){
-        const a = img[i+3];
-        if(a>10){
-          const r=img[i], g=img[i+1], b=img[i+2];
-          sum += (r+g+b)/3;
-          count++;
-        }
-      }
-      const targetAvg = count ? (sum/count) : 140;
-
-      // Amostra do rosto fonte (já mascarado no canvas do rosto)
-      const sdata = srcFaceCtx.getImageData(0,0,w,h).data;
-      let ssum=0, scount=0;
-      for(let i=0;i<sdata.length;i+=16){
-        const a=sdata[i+3];
-        if(a>10){
-          const r=sdata[i], g=sdata[i+1], b=sdata[i+2];
-          ssum += (r+g+b)/3;
-          scount++;
-        }
-      }
-      const srcAvg = scount ? (ssum/scount) : 140;
-
-      const delta = (targetAvg - srcAvg) * strength;
-
-      const id = srcFaceCtx.getImageData(0,0,w,h);
-      const d = id.data;
-      for(let i=0;i<d.length;i+=4){
-        if(d[i+3]>0){
-          d[i] = Math.max(0, Math.min(255, d[i] + delta));
-          d[i+1] = Math.max(0, Math.min(255, d[i+1] + delta));
-          d[i+2] = Math.max(0, Math.min(255, d[i+2] + delta));
-        }
-      }
-      srcFaceCtx.putImageData(id,0,0);
-    }
-
-    function computeEyeTransform(srcPts, dstPts){
-      const srcL = srcPts[IDX.leftEyeOuter];
-      const srcR = srcPts[IDX.rightEyeOuter];
-      const dstL = dstPts[IDX.leftEyeOuter];
-      const dstR = dstPts[IDX.rightEyeOuter];
-
-      const srcCenter = { x:(srcL.x+srcR.x)/2, y:(srcL.y+srcR.y)/2 };
-      const dstCenter = { x:(dstL.x+dstR.x)/2, y:(dstL.y+dstR.y)/2 };
-
-      const srcD = dist(srcL, srcR);
-      const dstD = dist(dstL, dstR);
-
-      const scale = dstD / srcD;
-      const rot = angle(dstL, dstR) - angle(srcL, srcR);
-
-      return { srcCenter, dstCenter, scale, rot };
-    }
-
-    function doSwap(){
-      setStatus("Processando...");
-
-      // Base do resultado = alvo
-      outCanvas.width = dstCanvas.width;
-      outCanvas.height = dstCanvas.height;
-      outCtx.clearRect(0,0,outCanvas.width,outCanvas.height);
-      outCtx.drawImage(dstCanvas, 0, 0);
-
-      // Monta máscara do alvo
-      const mask = buildSoftMask(outCanvas.width, outCanvas.height, dstLandmarks, 12);
-
-      // Cria canvas do rosto fonte já alinhado
-      const face = document.createElement("canvas");
-      face.width = outCanvas.width;
-      face.height = outCanvas.height;
-      const fctx = face.getContext("2d");
-
-      const t = computeEyeTransform(srcLandmarks, dstLandmarks);
-
-      // Desenha a imagem fonte transformada no canvas do rosto
-      fctx.save();
-      fctx.translate(t.dstCenter.x, t.dstCenter.y);
-      fctx.rotate(t.rot);
-      fctx.scale(t.scale, t.scale);
-      fctx.translate(-t.srcCenter.x, -t.srcCenter.y);
-      fctx.drawImage(srcCanvas, 0, 0);
-      fctx.restore();
-
-      // Aplica máscara no rosto
-      fctx.globalCompositeOperation = "destination-in";
-      fctx.drawImage(mask, 0, 0);
-      fctx.globalCompositeOperation = "source-over";
-
-      // Ajuste de brilho leve pra casar com o alvo
-      applySoftColorMatch(fctx, dstCtx, mask, 0.28);
-
-      // Mistura no resultado
-      outCtx.save();
-      outCtx.globalAlpha = 0.98;
-      outCtx.drawImage(face, 0, 0);
-      outCtx.restore();
-
-      setStatus("Pronto. Se precisar, troque as fotos por outras mais parecidas.");
-      downloadBtn.disabled = false;
-    }
-
-    function updateButtons(){
-      const ok = !!(srcImg && dstImg && srcLandmarks && dstLandmarks);
-      swapBtn.disabled = !ok;
-      if(ok) setStatus("Pronto para trocar. Clique em Swap Faces.");
-    }
-
-    srcFile.addEventListener("change", async (e) => {
-      const f = e.target.files && e.target.files[0];
-      if(!f) return;
-      setStatus("Carregando imagem fonte...");
-      srcImg = await readImage(f);
-      drawImageToCanvas(srcCtx, srcCanvas, srcImg);
-      setStatus("Detectando rosto na fonte...");
-      srcLandmarks = await detectLandmarks(srcImg);
-      if(!srcLandmarks){
-        setStatus("Não detectei rosto na imagem fonte. Tente outra foto.");
-        swapBtn.disabled = true;
-        return;
-      }
-      setStatus("Fonte OK. Agora carregue a imagem alvo.");
-      updateButtons();
-    });
-
-    dstFile.addEventListener("change", async (e) => {
-      const f = e.target.files && e.target.files[0];
-      if(!f) return;
-      setStatus("Carregando imagem alvo...");
-      dstImg = await readImage(f);
-      drawImageToCanvas(dstCtx, dstCanvas, dstImg);
-      setStatus("Detectando rosto no alvo...");
-      dstLandmarks = await detectLandmarks(dstImg);
-      if(!dstLandmarks){
-        setStatus("Não detectei rosto na imagem alvo. Tente outra foto.");
-        swapBtn.disabled = true;
-        return;
-      }
-      setStatus("Alvo OK. Se a fonte também estiver OK, pode trocar.");
-      updateButtons();
-    });
-
-    swapBtn.addEventListener("click", () => {
-      try { doSwap(); }
-      catch(err){
-        console.error(err);
-        setStatus("Deu erro ao processar. Abra o console e me mande o erro se aparecer.");
-      }
-    });
-
-    downloadBtn.addEventListener("click", () => {
-      const a = document.createElement("a");
-      a.download = "face-swap.png";
-      a.href = outCanvas.toDataURL("image/png");
-      a.click();
-    });
-  </script>
-</body>
+    <footer><div class="shell"><span>FaceUp Browser</span><span>Processamento local. Use imagens com autorização.</span></div></footer>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/delaunator@5.0.1/delaunator.min.js" crossorigin="anonymous"></script>
+    <script type="module" src="./src/app.js"></script>
+  </body>
 </html>
