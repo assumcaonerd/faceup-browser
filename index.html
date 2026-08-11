@@ -8,6 +8,9 @@
     <title>FaceUp Browser</title>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="stylesheet" href="./src/styles.css" />
+    <script type="importmap">
+      {"imports":{"@mediapipe/tasks-vision":"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/vision_bundle.mjs"}}
+    </script>
   </head>
   <body>
     <header class="hero">
@@ -37,7 +40,7 @@
 
       <section class="upload-grid" aria-label="Seleção de imagens">
         <article class="upload-card" id="sourceDrop">
-          <div class="card-heading"><span class="step">1</span><div><h2>Rosto de origem</h2><p>O rosto que será aplicado</p></div></div>
+          <div class="card-heading"><span class="step">1</span><div><h2>Rosto e cabelo de origem</h2><p>A identidade que será aplicada</p></div></div>
           <label class="drop-zone" for="sourceInput">
             <input id="sourceInput" type="file" accept="image/jpeg,image/png,image/webp" />
             <canvas id="sourceCanvas" hidden></canvas>
@@ -60,10 +63,11 @@
       <section class="controls-card" aria-labelledby="controlsTitle">
         <div class="section-title"><div><p class="eyebrow">Acabamento</p><h2 id="controlsTitle">Ajustes do resultado</h2></div><button id="resetControls" class="text-button" type="button">Restaurar padrão</button></div>
         <div class="controls-grid">
-          <label><span>Suavização <output id="featherValue">24</output></span><input id="feather" type="range" min="4" max="50" value="24" /></label>
+          <label><span>Suavização <output id="featherValue">34</output></span><input id="feather" type="range" min="4" max="60" value="34" /></label>
           <label><span>Correção de cor <output id="colorValue">65%</output></span><input id="colorMatch" type="range" min="0" max="100" value="65" /></label>
           <label><span>Opacidade <output id="opacityValue">100%</output></span><input id="opacity" type="range" min="50" max="100" value="100" /></label>
         </div>
+        <label class="check-control"><input id="includeHair" type="checkbox" checked /><span><strong>Transferir cabelo</strong><small>Usa segmentação por IA para incluir o cabelo da foto de origem.</small></span></label>
         <button id="processButton" class="primary-button" type="button" disabled><span aria-hidden="true">✦</span> Criar face swap</button>
       </section>
 
@@ -79,8 +83,6 @@
     </main>
 
     <footer><div class="shell"><span>FaceUp Browser</span><span>Processamento local. Use imagens com autorização.</span></div></footer>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/delaunator@5.0.1/delaunator.min.js" crossorigin="anonymous"></script>
     <script type="module" src="./src/app.js"></script>
   </body>
 </html>

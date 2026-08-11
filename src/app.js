@@ -1,3 +1,5 @@
+import { FaceLandmarker, FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision';
+
 const $ = (selector) => document.querySelector(selector);
 
 const elements = {
@@ -6,13 +8,11 @@ const elements = {
   targetDrop: $('#targetDrop'), processButton: $('#processButton'), downloadButton: $('#downloadButton'),
   compareButton: $('#compareButton'), resultSection: $('#resultSection'), statusIcon: $('#statusIcon'),
   statusTitle: $('#statusTitle'), statusText: $('#statusText'), progressBar: $('#progressBar'),
-  feather: $('#feather'), colorMatch: $('#colorMatch'), opacity: $('#opacity'),
+  feather: $('#feather'), colorMatch: $('#colorMatch'), opacity: $('#opacity'), includeHair: $('#includeHair'),
 };
 
-const state = { source: null, target: null, sourcePoints: null, targetPoints: null, busy: false, result: null };
+const state = { source: null, target: null, sourcePoints: null, targetPoints: null, sourceParts: null, targetParts: null, busy: false, result: null };
 const FACE_OVAL = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109];
-const FEATURE_POINTS = [1,4,6,9,33,46,52,55,65,70,105,107,133,145,153,159,168,173,246,249,263,276,282,285,295,300,334,336,362,374,380,386,398,466,61,78,80,81,82,87,88,91,95,146,178,181,185,191,267,269,270,291,308,310,311,312,317,318,321,324,375,402,405,409,415];
-const MESH_POINTS = [...new Set([...FACE_OVAL, ...FEATURE_POINTS])];
 
 function setStatus(title, text, progress = 10, icon = '1') {
   elements.statusTitle.textContent = title; elements.statusText.textContent = text;
@@ -35,23 +35,42 @@ async function decodeImage(file) {
   return canvas;
 }
 
-function createFaceDetector() {
-  const detector = new globalThis.FaceMesh({
-    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
-  });
-  detector.setOptions({ maxNumFaces: 1, refineLandmarks: true, staticImageMode: true, minDetectionConfidence: 0.5 });
-  return detector;
-}
-const detectors = { source: createFaceDetector(), target: createFaceDetector() };
+let visionPromise, segmenterPromise, faceLandmarkerPromise;
 
-async function detectFace(canvas, kind) {
-  const detector = detectors[kind];
-  const detection = new Promise((resolve, reject) => {
-    detector.onResults((results) => resolve(results.multiFaceLandmarks?.[0] ?? null));
-    detector.send({ image: canvas }).catch(reject);
-  });
-  const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('A detecção facial demorou demais. Verifique sua conexão e tente novamente.')), 25000));
-  const normalized = await Promise.race([detection, timeout]);
+function getVision() {
+  visionPromise ??= FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm');
+  return visionPromise;
+}
+
+function getSegmenter() {
+  segmenterPromise ??= getVision().then((vision) => ImageSegmenter.createFromOptions(vision, {
+      baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite' },
+      runningMode: 'IMAGE', outputCategoryMask: true, outputConfidenceMasks: false,
+    }));
+  return segmenterPromise;
+}
+
+function getFaceLandmarker() {
+  faceLandmarkerPromise ??= getVision().then((vision) => FaceLandmarker.createFromOptions(vision, {
+    baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task' },
+    runningMode: 'IMAGE', numFaces: 1, minFaceDetectionConfidence: 0.5,
+  }));
+  return faceLandmarkerPromise;
+}
+
+async function segmentParts(canvas) {
+  const segmenter = await getSegmenter();
+  const result = segmenter.segment(canvas);
+  const mask = result.categoryMask;
+  if (!mask) throw new Error('O modelo não retornou a segmentação de cabelo.');
+  const parts = { width: mask.width, height: mask.height, data: new Uint8Array(mask.getAsUint8Array()) };
+  result.close();
+  return parts;
+}
+
+async function detectFace(canvas) {
+  const detector = await getFaceLandmarker();
+  const normalized = detector.detect(canvas).faceLandmarks?.[0] ?? null;
   return normalized?.map((point) => ({ x: point.x * canvas.width, y: point.y * canvas.height })) ?? null;
 }
 
@@ -68,10 +87,11 @@ async function loadSlot(kind, file) {
   try {
     setStatus(`Lendo a imagem de ${label}`, 'Ajustando tamanho e orientação…', 25, '…');
     const image = await decodeImage(file); renderPreview(image, elements[`${kind}Canvas`]);
-    setStatus('Localizando o rosto', `Analisando a foto de ${label} neste dispositivo…`, 52, '…');
-    const points = await detectFace(image, kind);
+    setStatus('Analisando rosto e cabelo', `Mapeando a foto de ${label} neste dispositivo…`, 52, '…');
+    const points = await detectFace(image);
+    const parts = await segmentParts(image);
     if (!points) throw new Error(`Nenhum rosto foi encontrado na imagem de ${label}. Tente uma foto frontal e nítida.`);
-    state[kind] = image; state[`${kind}Points`] = points;
+    state[kind] = image; state[`${kind}Points`] = points; state[`${kind}Parts`] = parts;
     const ready = state.sourcePoints && state.targetPoints;
     setStatus(ready ? 'Tudo pronto' : 'Primeiro rosto detectado', ready ? 'Ajuste os controles ou crie o resultado.' : 'Agora escolha a outra imagem.', ready ? 100 : 60, ready ? '✓' : '2');
     elements.processButton.disabled = !ready;
@@ -80,31 +100,52 @@ async function loadSlot(kind, file) {
   } finally { state.busy = false; }
 }
 
-function triangleTransform(ctx, source, s0, s1, s2, d0, d1, d2) {
-  const det = s0.x * (s1.y - s2.y) + s1.x * (s2.y - s0.y) + s2.x * (s0.y - s1.y);
-  if (Math.abs(det) < .01) return;
-  const a = (d0.x * (s1.y-s2.y) + d1.x * (s2.y-s0.y) + d2.x * (s0.y-s1.y)) / det;
-  const b = (d0.y * (s1.y-s2.y) + d1.y * (s2.y-s0.y) + d2.y * (s0.y-s1.y)) / det;
-  const c = (d0.x * (s2.x-s1.x) + d1.x * (s0.x-s2.x) + d2.x * (s1.x-s0.x)) / det;
-  const d = (d0.y * (s2.x-s1.x) + d1.y * (s0.x-s2.x) + d2.y * (s1.x-s0.x)) / det;
-  const e = (d0.x*(s1.x*s2.y-s2.x*s1.y)+d1.x*(s2.x*s0.y-s0.x*s2.y)+d2.x*(s0.x*s1.y-s1.x*s0.y))/det;
-  const f = (d0.y*(s1.x*s2.y-s2.x*s1.y)+d1.y*(s2.x*s0.y-s0.x*s2.y)+d2.y*(s0.x*s1.y-s1.x*s0.y))/det;
-  ctx.save(); ctx.beginPath(); ctx.moveTo(d0.x,d0.y); ctx.lineTo(d1.x,d1.y); ctx.lineTo(d2.x,d2.y); ctx.closePath(); ctx.clip();
-  ctx.transform(a,b,c,d,e,f); ctx.drawImage(source,0,0); ctx.restore();
-}
-
 function createWarpedFace() {
   const canvas = document.createElement('canvas'); canvas.width = state.target.width; canvas.height = state.target.height;
-  const ctx = canvas.getContext('2d'); const targetSubset = MESH_POINTS.map((i) => state.targetPoints[i]);
-  const triangles = globalThis.Delaunator.from(targetSubset.map((p) => [p.x,p.y])).triangles;
-  for (let i=0;i<triangles.length;i+=3) {
-    const ia=MESH_POINTS[triangles[i]], ib=MESH_POINTS[triangles[i+1]], ic=MESH_POINTS[triangles[i+2]];
-    triangleTransform(ctx,state.source,state.sourcePoints[ia],state.sourcePoints[ib],state.sourcePoints[ic],state.targetPoints[ia],state.targetPoints[ib],state.targetPoints[ic]);
-  }
+  const ctx = canvas.getContext('2d'); const transform=eyeTransform();
+  ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.translate(transform.targetCenter.x,transform.targetCenter.y);ctx.rotate(transform.rotation);ctx.scale(transform.scale,transform.scale);ctx.translate(-transform.sourceCenter.x,-transform.sourceCenter.y);ctx.drawImage(state.source,0,0);
   return canvas;
 }
 
 function ovalPath(ctx, points) { ctx.beginPath(); FACE_OVAL.forEach((index,i) => { const p=points[index]; i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y); }); ctx.closePath(); }
+
+function eyeTransform() {
+  const sourceLeft=state.sourcePoints[33], sourceRight=state.sourcePoints[263];
+  const targetLeft=state.targetPoints[33], targetRight=state.targetPoints[263];
+  const sourceCenter={x:(sourceLeft.x+sourceRight.x)/2,y:(sourceLeft.y+sourceRight.y)/2};
+  const targetCenter={x:(targetLeft.x+targetRight.x)/2,y:(targetLeft.y+targetRight.y)/2};
+  const sourceDistance=Math.hypot(sourceRight.x-sourceLeft.x,sourceRight.y-sourceLeft.y);
+  const targetDistance=Math.hypot(targetRight.x-targetLeft.x,targetRight.y-targetLeft.y);
+  return {sourceCenter,targetCenter,scale:targetDistance/sourceDistance,rotation:Math.atan2(targetRight.y-targetLeft.y,targetRight.x-targetLeft.x)-Math.atan2(sourceRight.y-sourceLeft.y,sourceRight.x-sourceLeft.x)};
+}
+
+function maskForCategory(parts, category, width, height, blur=0) {
+  const small=document.createElement('canvas'); small.width=parts.width; small.height=parts.height;
+  const image=small.getContext('2d').createImageData(parts.width,parts.height);
+  for(let i=0;i<parts.data.length;i+=1){const alpha=parts.data[i]===category?255:0;image.data[i*4]=255;image.data[i*4+1]=255;image.data[i*4+2]=255;image.data[i*4+3]=alpha;}
+  small.getContext('2d').putImageData(image,0,0);
+  const mask=document.createElement('canvas'); mask.width=width; mask.height=height; const ctx=mask.getContext('2d');
+  ctx.filter=blur?`blur(${blur}px)`:'none'; ctx.drawImage(small,0,0,width,height); return mask;
+}
+
+function categoryColorStats(canvas, parts, category) {
+  const sample=document.createElement('canvas'); sample.width=parts.width; sample.height=parts.height; const ctx=sample.getContext('2d');
+  ctx.drawImage(canvas,0,0,sample.width,sample.height); const pixels=ctx.getImageData(0,0,sample.width,sample.height).data;
+  let r=0,g=0,b=0,count=0;
+  for(let i=0;i<parts.data.length;i+=1){if(parts.data[i]===category){r+=pixels[i*4];g+=pixels[i*4+1];b+=pixels[i*4+2];count+=1;}}
+  return count?[r/count,g/count,b/count]:[128,110,90];
+}
+
+function createRecoloredTargetHair() {
+  if(!state.sourceParts||!state.targetParts)return null;
+  const sourceMean=categoryColorStats(state.source,state.sourceParts,1); const targetMean=categoryColorStats(state.target,state.targetParts,1);
+  const layer=document.createElement('canvas'); layer.width=state.target.width; layer.height=state.target.height; const ctx=layer.getContext('2d'); ctx.drawImage(state.target,0,0);
+  const mask=maskForCategory(state.targetParts,1,layer.width,layer.height,3); const maskData=mask.getContext('2d').getImageData(0,0,layer.width,layer.height).data;
+  const image=ctx.getImageData(0,0,layer.width,layer.height); const pixels=image.data;
+  const gain=sourceMean.map((value,index)=>Math.max(.75,Math.min(3.2,value/(targetMean[index]||1))));
+  for(let i=0;i<pixels.length;i+=4){const strength=maskData[i+3]/255*.9;if(strength>.01){for(let channel=0;channel<3;channel+=1){const adjusted=Math.min(255,pixels[i+channel]*gain[channel]);pixels[i+channel]=pixels[i+channel]*(1-strength)+adjusted*strength;}}}
+  ctx.putImageData(image,0,0); ctx.globalCompositeOperation='destination-in'; ctx.drawImage(mask,0,0); return layer;
+}
 
 function meanColor(canvas, points) {
   const ctx=canvas.getContext('2d'); const xs=FACE_OVAL.map(i=>points[i].x), ys=FACE_OVAL.map(i=>points[i].y);
@@ -119,6 +160,7 @@ function processSwap() {
     setStatus('Criando o resultado', 'Alinhando a malha e combinando luz e cor…', 75, '…');
     const warped=createWarpedFace(); const result=elements.resultCanvas; result.width=state.target.width; result.height=state.target.height;
     const ctx=result.getContext('2d'); ctx.drawImage(state.target,0,0);
+    if(elements.includeHair.checked){const recolored=createRecoloredTargetHair();if(recolored)ctx.drawImage(recolored,0,0);}
     const strength=Number(elements.colorMatch.value)/100; const src=meanColor(warped,state.targetPoints), dst=meanColor(state.target,state.targetPoints);
     const brightness=((dst[0]+dst[1]+dst[2])/(src[0]+src[1]+src[2]||1)-1)*strength+1;
     const colored=document.createElement('canvas'); colored.width=result.width; colored.height=result.height; const cctx=colored.getContext('2d');
@@ -140,4 +182,4 @@ elements.downloadButton.addEventListener('click',()=>elements.resultCanvas.toBlo
 function showOriginal(show){if(!state.target||!state.result)return;const ctx=elements.resultCanvas.getContext('2d');ctx.clearRect(0,0,elements.resultCanvas.width,elements.resultCanvas.height);ctx.drawImage(show?state.target:state.result,0,0);$('#comparisonLabel').hidden=!show;}
 ['pointerdown','keydown'].forEach(e=>elements.compareButton.addEventListener(e,event=>{if(e==='keydown'&&!['Enter',' '].includes(event.key))return;showOriginal(true)}));['pointerup','pointerleave','keyup'].forEach(e=>elements.compareButton.addEventListener(e,()=>showOriginal(false)));
 [['feather','featherValue',''],['colorMatch','colorValue','%'],['opacity','opacityValue','%']].forEach(([id,out,suffix])=>elements[id].addEventListener('input',()=>{$(`#${out}`).value=`${elements[id].value}${suffix}`}));
-$('#resetControls').addEventListener('click',()=>{elements.feather.value=24;elements.colorMatch.value=65;elements.opacity.value=100;$('#featherValue').value='24';$('#colorValue').value='65%';$('#opacityValue').value='100%'});
+$('#resetControls').addEventListener('click',()=>{elements.feather.value=34;elements.colorMatch.value=65;elements.opacity.value=100;$('#featherValue').value='34';$('#colorValue').value='65%';$('#opacityValue').value='100%'});
