@@ -15,6 +15,7 @@ Aplicativo web para troca de rosto e cabelo com dois modos de processamento:
 - comparação entre original e resultado;
 - exportação em PNG;
 - interface responsiva e acessível;
+- instalação como PWA e cache local dos modelos MediaPipe após o primeiro carregamento;
 - lint, testes e build automatizáveis.
 
 ## Executar localmente
@@ -57,6 +58,12 @@ A chave fica somente no servidor. Nunca use uma variável prefixada com `VITE_` 
 No modo local, as fotos permanecem no dispositivo. No modo generativo, as duas imagens são enviadas à API configurada para produzir o resultado e não são salvas pelo código do aplicativo. A função remove os arquivos temporários ao final da requisição.
 
 Use somente imagens próprias ou com autorização das pessoas retratadas. Não use o aplicativo para fraude, assédio ou falsidade ideológica.
+
+O Service Worker armazena somente arquivos públicos do MediaPipe. As fotografias selecionadas e os resultados não são adicionados ao cache do aplicativo.
+
+## Contribuições e segurança
+
+Leia [CONTRIBUTING.md](CONTRIBUTING.md) antes de abrir um pull request. Vulnerabilidades devem seguir as orientações de [SECURITY.md](SECURITY.md), sem exposição pública de dados pessoais.
 
 ## Limitações
 

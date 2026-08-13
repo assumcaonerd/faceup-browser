@@ -1,4 +1,6 @@
 import { FaceLandmarker, FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision';
+import { compressImage } from './utils/imageCompression.js';
+import { registerServiceWorker } from './sw-register.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -10,6 +12,7 @@ const elements = {
   statusTitle: $('#statusTitle'), statusText: $('#statusText'), progressBar: $('#progressBar'),
   feather: $('#feather'), colorMatch: $('#colorMatch'), opacity: $('#opacity'), includeHair: $('#includeHair'),
   processingModes: [...document.querySelectorAll('input[name="processingMode"]')],
+  privacyBadge: $('#privacyBadge'), privacyDescription: $('#privacyDescription'),
 };
 
 const state = { source: null, target: null, sourceFile: null, targetFile: null, sourcePoints: null, targetPoints: null, sourceParts: null, targetParts: null, busy: false, result: null };
@@ -190,8 +193,10 @@ async function decodeGeneratedImage(base64, mimeType) {
 async function processGenerativeSwap() {
   state.busy=true; elements.processButton.disabled=true;
   try {
-    setStatus('Criando rosto e penteado','Enviando as duas imagens ao backend generativo. Isso pode levar alguns minutos…',35,'…');
-    const form=new FormData(); form.append('target',state.targetFile); form.append('source',state.sourceFile); form.append('includeHair',String(elements.includeHair.checked));
+    setStatus('Preparando imagens','Otimizando as fotos sem descartar os detalhes importantes…',20,'…');
+    const [targetFile,sourceFile]=await Promise.all([compressImage(state.targetFile),compressImage(state.sourceFile)]);
+    setStatus('Criando rosto e penteado','Enviando as duas imagens ao provedor generativo. Isso pode levar alguns minutos…',35,'…');
+    const form=new FormData(); form.append('target',targetFile); form.append('source',sourceFile); form.append('includeHair',String(elements.includeHair.checked));
     const response=await fetch('/api/generative-swap',{method:'POST',body:form,signal:AbortSignal.timeout(240_000)}); const payload=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(payload.error||`Falha no backend generativo (${response.status}).`);
     setStatus('Finalizando a imagem','Preparando a visualização em alta resolução…',90,'…'); finishResult(await decodeGeneratedImage(payload.image,payload.mimeType||'image/png'));
@@ -201,16 +206,18 @@ async function processGenerativeSwap() {
 }
 
 function selectedMode(){return elements.processingModes.find((input)=>input.checked)?.value||'local';}
+function updatePrivacyMessage(){const generative=selectedMode()==='generative';elements.privacyBadge.innerHTML=`<span aria-hidden="true">●</span> ${generative?'Modo generativo com envio':'Modo local e privado'}`;elements.privacyDescription.textContent=generative?'No modo generativo, as duas imagens são enviadas ao provedor de IA configurado para criar o resultado.':'No modo local, suas imagens são processadas neste dispositivo e não são enviadas ao nosso servidor.';}
 function processSwap(){if(state.busy)return;if(selectedMode()==='generative')processGenerativeSwap();else processLocalSwap();}
 
 async function detectGenerativeAvailability(){
   const input=elements.processingModes.find((item)=>item.value==='generative'); const note=$('#generativeAvailability');
-  try{const response=await fetch('/api/generative-swap',{headers:{Accept:'application/json'}});const payload=await response.json();if(!response.ok||!payload.available)throw new Error();input.disabled=false;input.checked=true;note.textContent=`Disponível com ${payload.model||'modelo generativo'}. Transfere rosto e penteado completos.`;}
-  catch{input.disabled=true;note.textContent='Backend não configurado. O modo local continua disponível.';}
+  try{const response=await fetch('/api/generative-swap',{headers:{Accept:'application/json'}});const payload=await response.json();if(!response.ok||!payload.available)throw new Error();input.disabled=false;input.checked=true;note.textContent=`Disponível com ${payload.model||'modelo generativo'}. Transfere rosto e penteado completos.`;updatePrivacyMessage();}
+  catch{input.disabled=true;note.textContent='Backend não configurado. O modo local continua disponível.';updatePrivacyMessage();}
 }
 
 function bindDrop(card,input,kind){['dragenter','dragover'].forEach(e=>card.addEventListener(e,(event)=>{event.preventDefault();card.classList.add('dragging')}));['dragleave','drop'].forEach(e=>card.addEventListener(e,(event)=>{event.preventDefault();card.classList.remove('dragging')}));card.addEventListener('drop',(event)=>loadSlot(kind,event.dataTransfer.files[0]));input.addEventListener('change',()=>loadSlot(kind,input.files[0]));card.querySelector('.replace-button').addEventListener('click',(event)=>{event.preventDefault();input.click()});}
 bindDrop(elements.sourceDrop,elements.sourceInput,'source'); bindDrop(elements.targetDrop,elements.targetInput,'target');
+elements.processingModes.forEach((input)=>input.addEventListener('change',updatePrivacyMessage));
 elements.processButton.addEventListener('click',processSwap);
 elements.downloadButton.addEventListener('click',()=>elements.resultCanvas.toBlob((blob)=>{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`faceup-${Date.now()}.png`;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)},'image/png'));
 function showOriginal(show){if(!state.target||!state.result)return;const ctx=elements.resultCanvas.getContext('2d');ctx.clearRect(0,0,elements.resultCanvas.width,elements.resultCanvas.height);ctx.drawImage(show?state.target:state.result,0,0);$('#comparisonLabel').hidden=!show;}
@@ -218,3 +225,4 @@ function showOriginal(show){if(!state.target||!state.result)return;const ctx=ele
 [['feather','featherValue',''],['colorMatch','colorValue','%'],['opacity','opacityValue','%']].forEach(([id,out,suffix])=>elements[id].addEventListener('input',()=>{$(`#${out}`).value=`${elements[id].value}${suffix}`}));
 $('#resetControls').addEventListener('click',()=>{elements.feather.value=34;elements.colorMatch.value=65;elements.opacity.value=100;$('#featherValue').value='34';$('#colorValue').value='65%';$('#opacityValue').value='100%'});
 detectGenerativeAvailability();
+updatePrivacyMessage(); registerServiceWorker();
