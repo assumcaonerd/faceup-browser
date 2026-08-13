@@ -12,6 +12,11 @@ function sendJson(response, status, body) {
   response.send(JSON.stringify(body));
 }
 
+function applySecurityHeaders(response) {
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('Referrer-Policy', 'no-referrer');
+}
+
 function isRateLimited(request) {
   const now = Date.now();
   const address = String(request.headers['x-forwarded-for'] || request.socket?.remoteAddress || 'unknown').split(',')[0].trim();
@@ -47,10 +52,14 @@ Preserve exactly from the TARGET: body, pose, hands, clothing, accessories unrel
 }
 
 export default async function handler(request, response) {
+  applySecurityHeaders(response);
   if (request.method === 'GET') return sendJson(response, 200, { available: Boolean(process.env.OPENAI_API_KEY), model: 'gpt-image-2' });
   if (request.method !== 'POST') return sendJson(response, 405, { error: 'Método não permitido.' });
   if (!process.env.OPENAI_API_KEY) return sendJson(response, 503, { error: 'O modo generativo ainda não foi configurado no servidor.' });
-  if (isRateLimited(request)) return sendJson(response, 429, { error: 'Limite temporário atingido. Aguarde um minuto e tente novamente.' });
+  if (isRateLimited(request)) {
+    response.setHeader('Retry-After', '60');
+    return sendJson(response, 429, { error: 'Limite temporário atingido. Aguarde um minuto e tente novamente.', fallbackToLocal: true });
+  }
 
   let parsedFiles;
   try {

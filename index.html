@@ -3,9 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Troca de rostos privada, executada integralmente no navegador." />
+    <meta name="description" content="Troque rostos e cabelos no navegador. Use o modo local privado ou o modo generativo com IA." />
+    <meta name="robots" content="index,follow" />
     <meta name="theme-color" content="#07111f" />
-    <title>FaceUp Browser</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:site_name" content="FaceUp Browser" />
+    <meta property="og:title" content="FaceUp Browser — troca de rosto e cabelo" />
+    <meta property="og:description" content="Modo local privado e modo generativo com IA." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="FaceUp Browser" />
+    <meta name="twitter:description" content="Troca de rosto e cabelo no navegador." />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>FaceUp Browser — troca de rosto e cabelo</title>
     <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
     <link rel="stylesheet" href="./src/styles.css" />
     <link rel="stylesheet" href="./src/generative.css" />
@@ -20,12 +33,12 @@
           <span class="brand-mark" aria-hidden="true">F</span>
           <span>FaceUp <strong>Browser</strong></span>
         </a>
-        <span class="privacy-badge"><span aria-hidden="true">●</span> 100% local e privado</span>
+        <span class="privacy-badge" id="privacyBadge"><span aria-hidden="true">●</span> Modo local e privado</span>
       </nav>
       <div class="hero-content shell">
         <p class="eyebrow">Face swap no navegador</p>
         <h1>Troque rostos com privacidade e controle.</h1>
-        <p>Suas imagens são processadas neste dispositivo. Nenhuma foto é enviada para um servidor.</p>
+        <p id="privacyDescription">No modo local, suas imagens são processadas neste dispositivo e não são enviadas ao nosso servidor.</p>
       </div>
     </header>
 
