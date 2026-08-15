@@ -1,6 +1,7 @@
 import { FaceLandmarker, FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision';
 import { compressImage } from './utils/imageCompression.js';
 import { registerServiceWorker } from './sw-register.js';
+import { createMeshWarp } from './face-warp.js';
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -104,11 +105,20 @@ async function loadSlot(kind, file) {
   } finally { state.busy = false; }
 }
 
-function createWarpedFace() {
+function createRigidWarpedFace() {
   const canvas = document.createElement('canvas'); canvas.width = state.target.width; canvas.height = state.target.height;
   const ctx = canvas.getContext('2d'); const transform=eyeTransform();
   ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.translate(transform.targetCenter.x,transform.targetCenter.y);ctx.rotate(transform.rotation);ctx.scale(transform.scale,transform.scale);ctx.translate(-transform.sourceCenter.x,-transform.sourceCenter.y);ctx.drawImage(state.source,0,0);
   return canvas;
+}
+
+function createWarpedFace() {
+  try {
+    return createMeshWarp(state.source, state.target.width, state.target.height, state.sourcePoints, state.targetPoints);
+  } catch (error) {
+    console.warn('[FaceWarp] Malha indisponível; usando alinhamento simples pelos olhos.', error);
+    return createRigidWarpedFace();
+  }
 }
 
 function ovalPath(ctx, points) { ctx.beginPath(); FACE_OVAL.forEach((index,i) => { const p=points[index]; i ? ctx.lineTo(p.x,p.y) : ctx.moveTo(p.x,p.y); }); ctx.closePath(); }
